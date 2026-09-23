@@ -87,6 +87,8 @@ model User {
   timetableVersionsPubl   TimetableVersion[]       @relation("TimetablePublishedBy")
   auditEntries            AuditLog[]
   settingsUpdated         SystemSetting[]
+  ruleSetsCreated         AveragingRuleSet[]
+  moduleResults           ModuleResultSnapshot[]
   rolloversExecuted       YearRollover[]
 
   @@index([role, status])
@@ -148,6 +150,7 @@ model AcademicYear {
   homeroomAssignments HomeroomAssignment[]
   grades              Grade[]
   timetableVersions   TimetableVersion[]
+  ruleSets            AveragingRuleSet[]
   rolloversFrom       YearRollover[]       @relation("RolloverFrom")
   rolloversTo         YearRollover[]       @relation("RolloverTo")
 
@@ -227,6 +230,7 @@ model ClassSection {
   correctionRequests  GradeCorrectionRequest[]
   timetableEntries    TimetableEntry[]
   timetableOverrides  TimetableOverride[]
+  moduleResults       ModuleResultSnapshot[]
 
   @@unique([academicYearId, code])
   @@index([cohortId])
@@ -368,6 +372,7 @@ model Module {
   teachingAssignments TeachingAssignment[]
   grades              Grade[]
   correctionRequests  GradeCorrectionRequest[]
+  results             ModuleResultSnapshot[]
 
   @@unique([academicYearId, yearOfStudy, order])
   @@map("modules")
@@ -620,6 +625,57 @@ model GradeCorrectionRequest {
 
   @@index([status])
   @@map("grade_correction_requests")
+}
+
+// ───────────────────────────── Results ─────────────────────────────
+
+enum RuleSetStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+/// Versioned, configurable averaging rules (interpreted by src/server/results/engine.ts).
+/// An activated version is never edited; changes create a new version.
+model AveragingRuleSet {
+  id             String        @id @default(uuid()) @db.Uuid
+  name           String
+  version        Int
+  /// null = applies to every academic year without a more specific rule set
+  academicYearId String?       @map("academic_year_id") @db.Uuid
+  definition     Json
+  status         RuleSetStatus @default(DRAFT)
+  createdById    String?       @map("created_by_id") @db.Uuid
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  activatedAt    DateTime?     @map("activated_at") @db.Timestamptz(3)
+
+  academicYear AcademicYear? @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  createdBy    User?         @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  snapshots ModuleResultSnapshot[]
+
+  @@unique([name, version])
+  @@map("averaging_rule_sets")
+}
+
+/// Frozen module results of one class, written when the module is closed.
+model ModuleResultSnapshot {
+  id             String   @id @default(uuid()) @db.Uuid
+  moduleId       String   @map("module_id") @db.Uuid
+  classSectionId String   @map("class_section_id") @db.Uuid
+  ruleSetId      String?  @map("rule_set_id") @db.Uuid
+  /// Full computed table (per student: subject finals, conduct, practical, exam, module average).
+  data           Json
+  computedById   String?  @map("computed_by_id") @db.Uuid
+  computedAt     DateTime @default(now()) @map("computed_at") @db.Timestamptz(3)
+
+  module       Module            @relation(fields: [moduleId], references: [id], onDelete: Restrict)
+  classSection ClassSection      @relation(fields: [classSectionId], references: [id], onDelete: Restrict)
+  ruleSet      AveragingRuleSet? @relation(fields: [ruleSetId], references: [id], onDelete: Restrict)
+  computedBy   User?             @relation(fields: [computedById], references: [id], onDelete: Restrict)
+
+  @@unique([moduleId, classSectionId])
+  @@map("module_result_snapshots")
 }
 
 // ───────────────────────────── Timetable ─────────────────────────────

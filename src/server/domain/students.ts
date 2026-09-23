@@ -5,7 +5,7 @@ import { Errors } from "@/server/errors";
 import { recordAudit, AuditAction } from "@/server/audit/audit";
 import { assertPermission } from "@/server/authz/policy";
 import type { Actor } from "@/server/authz/actor";
-import type { createStudentSchema } from "@/lib/validation/schemas";
+import type { createStudentSchema, updateStudentSchema } from "@/lib/validation/schemas";
 import { todayUtc } from "@/server/authz/scope";
 
 /** Administrative student list (roster only – no grades). */
@@ -63,4 +63,65 @@ export async function createStudent(actor: Actor, input: z.infer<typeof createSt
     });
     return { ...student, enrollmentId: enrollment.id };
   });
+}
+
+/**
+ * Updates identity data only. Class membership cannot be changed through normal
+ * functionality (no transfer endpoint) – students stay with their class and
+ * their historical enrollments.
+ */
+export async function updateStudent(actor: Actor, id: string, input: z.infer<typeof updateStudentSchema>) {
+  await assertPermission(actor, "students.manage");
+  const before = await db.student.findUnique({ where: { id } });
+  if (!before) throw Errors.notFound();
+  return db.$transaction(async (tx) => {
+    const s = await tx.student.update({
+      where: { id },
+      data: {
+        firstName: input.firstName,
+        lastName: input.lastName,
+        rankId: input.rankId === undefined ? undefined : input.rankId,
+        registryNumber: input.registryNumber === undefined ? undefined : input.registryNumber || null,
+      },
+    });
+    await recordAudit(tx, actor, actor.meta, {
+      action: AuditAction.STUDENT_UPDATE,
+      entityType: "Student",
+      entityId: id,
+      studentId: id,
+      before: { firstName: before.firstName, lastName: before.lastName, registryNumber: before.registryNumber, rankId: before.rankId },
+      after: { firstName: s.firstName, lastName: s.lastName, registryNumber: s.registryNumber, rankId: s.rankId },
+    });
+    return s;
+  });
+}
+
+/** Administrative view of one student: identity + enrollment history (no grades). */
+export async function getStudentAdmin(actor: Actor, id: string) {
+  await assertPermission(actor, "structure.read");
+  const s = await db.student.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      registryNumber: true,
+      status: true,
+      rank: { select: { id: true, label: true } },
+      user: { select: { id: true, username: true, status: true } },
+      enrollments: {
+        select: {
+          id: true,
+          status: true,
+          startDate: true,
+          endDate: true,
+          classSection: { select: { id: true, code: true } },
+          academicYear: { select: { id: true, name: true } },
+        },
+        orderBy: { startDate: "asc" },
+      },
+    },
+  });
+  if (!s) throw Errors.notFound();
+  return s;
 }

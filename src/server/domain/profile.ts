@@ -16,6 +16,10 @@ export type Capabilities = {
   diriginte: boolean;
   orar: boolean;
   noteleMele: boolean;
+  introducereNote: boolean;
+  cereriCorectie: boolean;
+  aprobaCorecturi: boolean;
+  rapoarte: boolean;
 };
 
 export async function getCapabilities(actor: Actor): Promise<Capabilities> {
@@ -29,6 +33,10 @@ export async function getCapabilities(actor: Actor): Promise<Capabilities> {
     diriginte: !!scope && scope.homeroomClassIds.size > 0,
     orar: hasPermission(actor, "timetable.read.all") || hasPermission(actor, "timetable.read.own"),
     noteleMele: hasPermission(actor, "self.academic.read"),
+    introducereNote: hasPermission(actor, "grades.create.scoped"),
+    cereriCorectie: hasPermission(actor, "corrections.request") || hasPermission(actor, "corrections.review"),
+    aprobaCorecturi: hasPermission(actor, "corrections.review"),
+    rapoarte: hasPermission(actor, "academic.read.all") || (!!scope && scope.homeroomClassIds.size > 0) || scoped,
   };
 }
 

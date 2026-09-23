@@ -21,6 +21,10 @@ const personSelect = { id: true, firstName: true, lastName: true, rank: { select
 
 const gradeSelect = {
   id: true,
+  version: true,
+  authorId: true,
+  status: true,
+  updatedAt: true,
   studentId: true,
   subjectId: true,
   kind: true,
@@ -126,21 +130,31 @@ export async function getClassOverview(actor: Actor, classSectionId: string) {
   const subjectMap = new Map<string, { id: string; name: string; type: string; teachers: string[] }>();
   for (const t of taught) {
     const entry = subjectMap.get(t.subject.id) ?? { ...t.subject, teachers: [] };
-    entry.teachers.push([t.teacher.rank?.label, t.teacher.lastName, t.teacher.firstName].filter(Boolean).join(" "));
+    const name = [t.teacher.rank?.label, t.teacher.lastName, t.teacher.firstName].filter(Boolean).join(" ");
+    if (!entry.teachers.includes(name)) entry.teachers.push(name);
     subjectMap.set(t.subject.id, entry);
   }
   if (conduct && !subjectMap.has(conduct.id)) subjectMap.set(conduct.id, { ...conduct, teachers: [] });
   const subjects = [...subjectMap.values()]
     .filter((s) => subjectVisible(access, s.id))
-    .map((s) => ({
-      ...s,
-      canEnterGrades:
-        !!scope &&
-        (s.type === "CONDUCT"
+    .map((s) => {
+      // What the actor may enter for this subject: grade kinds and module scope (null = all modules).
+      const grants = scope ? scope.teaching.filter((t) => t.classSectionId === classSectionId && t.subjectId === s.id) : [];
+      const entry =
+        s.type === "CONDUCT"
           ? access.isHomeroom
-          : scope.teaching.some((t) => t.classSectionId === classSectionId && t.subjectId === s.id)),
-    }))
+            ? [{ kind: "FINAL", moduleId: null as string | null }]
+            : []
+          : grants.map((g) => ({ kind: g.kind === "MODULE_EXAM" ? "MODULE_EXAM" : "CURRENT", moduleId: g.moduleId }));
+      return { ...s, canEnterGrades: entry.length > 0, entry };
+    })
     .sort((a, b) => a.name.localeCompare(b.name, "ro"));
+
+  const modules = await db.module.findMany({
+    where: { academicYearId: cls.academicYear.id, yearOfStudy: cls.yearOfStudy },
+    select: { id: true, name: true, order: true, status: true, subjects: { select: { subjectId: true, hasFinalExam: true } } },
+    orderBy: { order: "asc" },
+  });
 
   return {
     class: {
@@ -152,13 +166,21 @@ export async function getClassOverview(actor: Actor, classSectionId: string) {
       homeroomTeacher: cls.homeroomAssignments[0]?.teacher ?? null,
     },
     isHomeroom: access.isHomeroom,
+    canSeeResults: access.gradeSubjects === "ALL",
     students: students.map((e) => e.student),
     subjects,
+    modules: modules.map((m) => ({
+      id: m.id,
+      name: m.name,
+      order: m.order,
+      status: m.status,
+      subjects: m.subjects,
+    })),
   };
 }
 
 /** Grades of one subject in one class (only if that pair is visible to the actor). */
-export async function getClassSubjectGrades(actor: Actor, classSectionId: string, subjectId: string) {
+export async function getClassSubjectGrades(actor: Actor, classSectionId: string, subjectId: string, moduleId?: string) {
   await assertClassSubjectReadable(actor, classSectionId, subjectId);
   const subject = await db.subject.findUnique({ where: { id: subjectId }, select: { id: true, name: true, type: true } });
   if (!subject) throw Errors.notFound();
@@ -169,7 +191,7 @@ export async function getClassSubjectGrades(actor: Actor, classSectionId: string
       orderBy: [{ student: { lastName: "asc" } }, { student: { firstName: "asc" } }],
     }),
     db.grade.findMany({
-      where: { classSectionId, subjectId, status: "ACTIVE" },
+      where: { classSectionId, subjectId, status: "ACTIVE", ...(moduleId ? { moduleId } : {}) },
       select: gradeSelect,
       orderBy: [{ gradeDate: "asc" }, { createdAt: "asc" }],
     }),

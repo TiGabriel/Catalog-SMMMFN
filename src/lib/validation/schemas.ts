@@ -150,8 +150,82 @@ export const createGradeSchema = z.strictObject({
   value: z.number({ error: "Nota trebuie să fie un număr." }).min(1, { error: "Nota minimă este 1." }).max(10, { error: "Nota maximă este 10." }),
   reasonId: uuid,
   gradeDate: isoDate,
-  moduleId: uuid.optional(),
+  moduleId: uuid,
   note: z.string().trim().max(300).optional(),
+});
+
+const gradeValue = z
+  .number({ error: "Nota trebuie să fie un număr." })
+  .min(1, { error: "Nota minimă este 1." })
+  .max(10, { error: "Nota maximă este 10." });
+
+export const updateGradeSchema = z
+  .strictObject({
+    value: gradeValue.optional(),
+    reasonId: uuid.optional(),
+    gradeDate: isoDate.optional(),
+    note: z.string().trim().max(300).nullable().optional(),
+    /** Mandatory justification of the change. */
+    changeReason: reasonText,
+    /** Optimistic locking: the version the user saw. */
+    version: z.number().int().min(1),
+  })
+  .refine((v) => v.value !== undefined || v.reasonId !== undefined || v.gradeDate !== undefined || v.note !== undefined, {
+    error: "Nu a fost modificat niciun câmp.",
+  });
+
+export const deleteGradeSchema = z.strictObject({
+  reason: reasonText,
+  version: z.number().int().min(1),
+});
+
+export const createCorrectionSchema = z
+  .strictObject({
+    gradeId: uuid,
+    type: z.enum(["MODIFY", "DELETE"], { error: "Tip de cerere invalid." }),
+    proposedValue: gradeValue.optional(),
+    proposedReasonId: uuid.optional(),
+    justification: reasonText,
+  })
+  .refine((v) => v.type === "DELETE" || v.proposedValue !== undefined, {
+    error: "Pentru o corectare indicați nota propusă.",
+    path: ["proposedValue"],
+  });
+
+export const reviewCorrectionSchema = z.strictObject({
+  decision: z.enum(["APPROVE", "REJECT"], { error: "Decizie invalidă." }),
+  comment: z.string().trim().max(500).optional(),
+});
+
+export const correctionQuerySchema = z.object({
+  status: z.enum(["PENDING", "APPROVED", "REJECTED", "CANCELLED"]).optional(),
+});
+
+export const moduleSubjectSchema = z.strictObject({
+  subjectId: uuid,
+  specializationId: uuid.nullable().optional(),
+  hasFinalExam: z.boolean().default(false),
+  weight: z.number().min(0).max(100).nullable().optional(),
+  hoursPerWeek: z.number().int().min(0).max(60).nullable().optional(),
+});
+
+export const updateModuleSubjectSchema = z.strictObject({
+  hasFinalExam: z.boolean().optional(),
+  weight: z.number().min(0).max(100).nullable().optional(),
+  hoursPerWeek: z.number().int().min(0).max(60).nullable().optional(),
+});
+
+export const updateStudentSchema = z.strictObject({
+  firstName: personName.optional(),
+  lastName: personName.optional(),
+  rankId: uuid.nullable().optional(),
+  registryNumber: z.string().trim().max(30).nullable().optional(),
+});
+
+export const ruleSetCreateSchema = z.strictObject({
+  name: shortText(80),
+  academicYearId: uuid.nullable().optional(),
+  definition: z.unknown(),
 });
 
 export const timetableQuerySchema = z.object({

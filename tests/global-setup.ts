@@ -1,11 +1,11 @@
 /**
- * Rebuilds the test database from scratch before the test run:
- * drop schema → prisma migrate deploy → least-privilege grants → base seed + demo fixtures.
- * Tests then connect with the application role (DATABASE_URL), exactly like production.
+ * Builds the template test database once per run:
+ * create → prisma migrate deploy → least-privilege grants → base seed + demo fixtures.
+ * Integration test files then copy it (tests/db.ts) so they never depend on each other.
+ * Tests connect with the application role (DATABASE_URL), exactly like production.
  */
 import { execSync } from "node:child_process";
 import { config as loadEnv } from "dotenv";
-import { Client } from "pg";
 import { hash } from "@node-rs/argon2";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
@@ -13,28 +13,26 @@ import { ARGON2_OPTIONS } from "../src/server/auth/argon2-options";
 import { seedBase } from "../prisma/seed-lib";
 import { DEMO_PASSWORD, seedDemo } from "../scripts/demo-data";
 import { applyGrants } from "../scripts/db-grants";
+import { TEMPLATE_DB, recreateDatabase, testDbName, withDatabase } from "./db";
 
 export default async function setup() {
   const env = loadEnv({ path: ".env.test", override: true, quiet: true }).parsed ?? {};
   const ownerUrl = env.MIGRATION_DATABASE_URL!;
   const appUrl = env.DATABASE_URL!;
-  if (!/catalog_test/.test(ownerUrl) || !/catalog_test/.test(appUrl)) {
-    throw new Error("Refuz să resetez o bază de date care nu este baza de test (catalog_test).");
+  if (testDbName(ownerUrl) !== "catalog_test" || testDbName(appUrl) !== "catalog_test") {
+    throw new Error("Refuz să folosesc o bază de date care nu este baza de test (catalog_test).");
   }
+  const tplOwner = withDatabase(ownerUrl, TEMPLATE_DB);
+  const tplApp = withDatabase(appUrl, TEMPLATE_DB);
 
-  const owner = new Client({ connectionString: ownerUrl });
-  await owner.connect();
-  await owner.query("DROP SCHEMA IF EXISTS public CASCADE");
-  await owner.query("CREATE SCHEMA public");
-  await owner.end();
-
+  await recreateDatabase(ownerUrl, TEMPLATE_DB);
   execSync("npx prisma migrate deploy", {
     stdio: "pipe",
-    env: { ...process.env, MIGRATION_DATABASE_URL: ownerUrl, DATABASE_URL: appUrl },
+    env: { ...process.env, MIGRATION_DATABASE_URL: tplOwner, DATABASE_URL: tplApp },
   });
-  await applyGrants(ownerUrl, env.DB_APP_ROLE ?? "catalog_app");
+  await applyGrants(tplOwner, env.DB_APP_ROLE ?? "catalog_app");
 
-  const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: appUrl }) });
+  const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: tplApp }) });
   try {
     await seedBase(prisma);
     await seedDemo(prisma, await hash(DEMO_PASSWORD, ARGON2_OPTIONS));
@@ -42,4 +40,6 @@ export default async function setup() {
   } finally {
     await prisma.$disconnect();
   }
+  // Also provide a ready copy for any test that does not reset explicitly.
+  await recreateDatabase(ownerUrl, testDbName(ownerUrl), TEMPLATE_DB);
 }

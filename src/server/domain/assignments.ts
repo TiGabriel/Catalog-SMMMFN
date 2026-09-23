@@ -79,26 +79,37 @@ export async function createTeachingAssignment(actor: Actor, input: z.infer<type
   }
   let moduleId: string | null = null;
   if (input.kind === "MODULE_EXAM" || input.moduleId) {
+    // A module-specific assignment requires the subject to be part of that module.
     if (!input.moduleId) throw Errors.validation({ moduleId: ["Selectați modulul."] });
     const mod = await db.module.findUnique({ where: { id: input.moduleId } });
     if (!mod || mod.academicYearId !== cls.academicYearId || mod.yearOfStudy !== cls.yearOfStudy) {
       throw Errors.validation({ moduleId: ["Modul invalid pentru această clasă."] });
     }
     if (mod.status === "CLOSED") throw Errors.conflict("Modulul este închis.");
+    const ms = await db.moduleSubject.findFirst({ where: { moduleId: mod.id, subjectId: subject.id } });
+    if (!ms) throw Errors.validation({ moduleId: ["Materia nu face parte din planul acestui modul."] });
+    if (input.kind === "MODULE_EXAM" && !ms.hasFinalExam) {
+      throw Errors.validation({ kind: ["Materia nu are examen final în acest modul."] });
+    }
     moduleId = mod.id;
   }
-  const duplicate = await db.teachingAssignment.findFirst({
+  // One responsible teacher per (class, subject, kind) and module scope. An assignment for
+  // "all modules" (moduleId null) overlaps with every module-specific one.
+  // (Substitute teachers: a future `role = SUBSTITUTE` with a bounded validity period.)
+  const overlapping = await db.teachingAssignment.findMany({
     where: {
-      teacherId: input.teacherId,
       classSectionId: cls.id,
       subjectId: subject.id,
       kind: input.kind,
-      moduleId,
       endedAt: null,
+      ...(moduleId ? { OR: [{ moduleId: null }, { moduleId }] } : {}),
     },
-    select: { id: true },
+    select: { id: true, teacherId: true },
   });
-  if (duplicate) throw Errors.conflict("Repartizarea există deja.");
+  if (overlapping.some((a) => a.teacherId === input.teacherId)) throw Errors.conflict("Repartizarea există deja.");
+  if (overlapping.length > 0) {
+    throw Errors.conflict("Materia are deja un profesor repartizat la această clasă pentru același tip și modul. Încheiați mai întâi repartizarea existentă.");
+  }
 
   const validFrom = input.validFrom ?? todayUtc();
   if (input.validTo && input.validTo < validFrom) {

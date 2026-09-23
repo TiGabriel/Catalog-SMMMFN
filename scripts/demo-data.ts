@@ -57,6 +57,22 @@ export async function seedDemo(prisma: PrismaClient, passwordHash: string) {
     update: {},
   });
 
+  const mod2 = await prisma.module.upsert({
+    where: { academicYearId_yearOfStudy_order: { academicYearId: year.id, yearOfStudy: 2, order: 1 } },
+    create: { academicYearId: year.id, yearOfStudy: 2, name: "Modulul 1", order: 1, status: "OPEN", startDate: year.startDate },
+    update: {},
+  });
+  const plan = async (moduleId: string, subjectId: string, hasFinalExam = false) => {
+    const exists = await prisma.moduleSubject.findFirst({ where: { moduleId, subjectId, specializationId: null } });
+    if (!exists) await prisma.moduleSubject.create({ data: { moduleId, subjectId, hasFinalExam, weight: 1 } });
+  };
+  await plan(mod1.id, mat.id, true);
+  await plan(mod1.id, eng.id);
+  await plan(mod1.id, nav.id, true);
+  await plan(mod1.id, practica.id);
+  await plan(mod2.id, mat.id);
+  await plan(mod2.id, eng.id);
+
   const student = async (registryNumber: string, firstName: string, lastName: string, classId: string, userId: string | null) => {
     const s = await prisma.student.upsert({
       where: { registryNumber },
@@ -124,7 +140,7 @@ export async function seedDemo(prisma: PrismaClient, passwordHash: string) {
         classSectionId,
         subjectId,
         academicYearId: year.id,
-        moduleId: classSectionId === c211.id ? null : mod1.id,
+        moduleId: classSectionId === c211.id ? mod2.id : mod1.id,
         kind,
         value,
         reasonId: await reason(reasonCode),
@@ -187,6 +203,6 @@ export async function seedDemo(prisma: PrismaClient, passwordHash: string) {
     subjects: { mat, eng, nav, practica, purtare },
     students: { sMarin, sStan, sDobre, sVasile, sPetre },
     grades: { gMarinMat, gMarinEng, gDobreNav, gMarinPurtare },
-    modules: { mod1 },
+    modules: { mod1, mod2 },
   };
 }

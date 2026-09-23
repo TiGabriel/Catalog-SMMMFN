@@ -3,6 +3,7 @@
  * Everything seeded here stays editable later through the administrator interface.
  */
 import type { PrismaClient } from "../src/generated/prisma/client";
+import { PROVISIONAL_RULES, PROVISIONAL_RULESET_NAME } from "../src/server/results/rules";
 
 export const CLASS_SUFFIXES = ["11", "12", "13", "14", "15", "24", "25"] as const;
 
@@ -123,6 +124,14 @@ export async function seedBase(prisma: PrismaClient) {
       where: { code: r.code },
       create: { code: r.code, label: r.label, appliesTo: [...r.appliesTo], sortOrder: i },
       update: {},
+    });
+  }
+
+  // Provisional averaging rules (global) until the school confirms the official ones.
+  const hasRuleSet = await prisma.averagingRuleSet.findFirst({ where: { status: "ACTIVE", academicYearId: null } });
+  if (!hasRuleSet) {
+    await prisma.averagingRuleSet.create({
+      data: { name: PROVISIONAL_RULESET_NAME, version: 1, definition: PROVISIONAL_RULES, status: "ACTIVE", activatedAt: new Date() },
     });
   }
 

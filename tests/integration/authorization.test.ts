@@ -28,6 +28,7 @@ import { PUT as updateSettingRoute } from "@/app/api/admin/settings/[key]/route"
 import { POST as createStudentRoute } from "@/app/api/admin/students/route";
 import { GET as gradeReasonsRoute } from "@/app/api/grade-reasons/route";
 import { db } from "@/server/db/client";
+import { resetTestDb } from "../db";
 import { call, fixtures, loginCookie, randomId, type Fixtures } from "../helpers";
 
 let f: Fixtures;
@@ -35,6 +36,7 @@ const cookies: Record<string, string> = {};
 const today = new Date().toISOString().slice(0, 10);
 
 beforeAll(async () => {
+  await resetTestDb();
   f = await fixtures();
   for (const u of ["admin.demo", "comandant.demo", "prof.popescu", "prof.ionescu", "prof.georgescu", "elev.marin"]) {
     cookies[u] = await loginCookie(u);
@@ -124,7 +126,7 @@ describe("PROFESOR (prof.popescu: Matematică în 111 și 112)", () => {
     // conduct grade without being diriginte
     expect((await postGrade(P, { subjectId: f.subjects.purtare, kind: "FINAL", reasonId: f.reasons.purtare })).status).toBe(404);
     // own subject in a class of year II where not assigned
-    expect((await postGrade(P, { studentId: f.students.petre, classSectionId: f.classes.c211, moduleId: undefined })).status).toBe(404);
+    expect((await postGrade(P, { studentId: f.students.petre, classSectionId: f.classes.c211, moduleId: f.moduleId2 })).status).toBe(404);
   });
 
   it("validează nota: 1–10, întreg, dată validă, motiv valid", async () => {
@@ -206,7 +208,7 @@ describe("DIRIGINTE (prof.ionescu: diriginte 112; predă Navigație + instruire 
   });
 
   it("gestionează nota la purtare doar în clasa proprie", async () => {
-    const ok = await postGrade(D, { subjectId: f.subjects.purtare, kind: "FINAL", reasonId: f.reasons.purtare, value: 10 });
+    const ok = await postGrade(D, { studentId: f.students.stan, subjectId: f.subjects.purtare, kind: "FINAL", reasonId: f.reasons.purtare, value: 10 });
     expect(ok.status, ok.text).toBe(200);
     const other = await postGrade(D, {
       studentId: f.students.dobre,
@@ -278,7 +280,7 @@ describe("ADMINISTRATOR", () => {
     expect(subject.status, subject.text).toBe(200);
     const mod = await call(createModuleRoute, "POST", "/api/admin/modules", {
       cookie,
-      body: { academicYearId: f.yearId, yearOfStudy: 2, name: "Modulul 1", order: 1 },
+      body: { academicYearId: f.yearId, yearOfStudy: 2, name: "Modulul 2", order: 2 },
     });
     expect(mod.status, mod.text).toBe(200);
 
@@ -478,7 +480,7 @@ describe("ciclul de viață al repartizărilor", () => {
     expect(created.status, created.text).toBe(200);
     const G = "prof.georgescu";
     expect((await get(classRoute, G, "/api/classes/x", { classId: f.classes.c211 })).status).toBe(200);
-    const grade = await postGrade(G, { studentId: f.students.petre, classSectionId: f.classes.c211, subjectId: f.subjects.eng, moduleId: undefined });
+    const grade = await postGrade(G, { studentId: f.students.petre, classSectionId: f.classes.c211, subjectId: f.subjects.eng, moduleId: f.moduleId2 });
     expect(grade.status, grade.text).toBe(200);
 
     const ended = await call(endAssignmentRoute, "POST", "/api/admin/assignments/x/end", {
@@ -488,7 +490,7 @@ describe("ciclul de viață al repartizărilor", () => {
     });
     expect(ended.status, ended.text).toBe(200);
     expect((await get(classRoute, G, "/api/classes/x", { classId: f.classes.c211 })).status).toBe(404);
-    expect((await postGrade(G, { studentId: f.students.petre, classSectionId: f.classes.c211, subjectId: f.subjects.eng, moduleId: undefined })).status).toBe(404);
+    expect((await postGrade(G, { studentId: f.students.petre, classSectionId: f.classes.c211, subjectId: f.subjects.eng, moduleId: f.moduleId2 })).status).toBe(404);
 
     // History: the assignment row and the grade (with its original author) remain.
     expect(await db.teachingAssignment.findUnique({ where: { id: created.json.assignment.id } })).not.toBeNull();

@@ -5,6 +5,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
 import { db } from "@/server/db/client";
+import { resetTestDb } from "../db";
 import { fixtures, type Fixtures } from "../helpers";
 
 let f: Fixtures;
@@ -12,6 +13,7 @@ let app: Client; // least-privilege application role
 let owner: Client; // schema owner (migrations)
 
 beforeAll(async () => {
+  await resetTestDb();
   f = await fixtures();
   app = new Client({ connectionString: process.env.DATABASE_URL });
   owner = new Client({ connectionString: process.env.MIGRATION_DATABASE_URL });

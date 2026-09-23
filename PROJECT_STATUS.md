@@ -3,12 +3,12 @@
 Electronic gradebook for **Școala Militară de Maiștri Militari a Forțelor Navale „Amiral Ion Murgescu”**. The UI is entirely in Romanian.
 The full design is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-_Last updated: 2026-09-23. Phase: **1 – Foundation (completed)**_
+_Last updated: 2026-09-23. Phase: **2 – Gradebook core (completed)**_
 
 ## Current state
 - Next.js 16 (App Router) + TypeScript, PostgreSQL 16 with Prisma 7 (`@prisma/adapter-pg`), Zod 4, argon2id, Vitest 5.
-- The backend foundation is complete: database schema, integrity triggers, authentication, sessions, RBAC with scope, audit, and administrator/catalog APIs.
-- There are no UI pages yet (API only). The Romanian UI comes in the following phases.
+- Phase 1 (foundation): database schema, integrity triggers, authentication, sessions, RBAC with scope, audit, administrator/catalog APIs.
+- Phase 2 (gradebook core): complete grade lifecycle (create/modify/delete with reason, history), special correction workflow, conduct / practical training / module exam, module plans, configurable results engine, Romanian UI (catalog, grade entry, history, results, corrections, administration of subjects/modules/assignments/students).
 
 ## How to run locally
 ```bash
@@ -42,6 +42,7 @@ Two PostgreSQL roles are used: `catalog_owner` (migrations) and `catalog_app` (t
 - **Curriculum:** `Subject` (GENERAL / SPECIALIZATION / PRACTICAL_TRAINING / CONDUCT), `Module`, `ModuleSubject`
 - **Assignments:** `TeachingAssignment` (kind: SUBJECT_TEACHING / PRACTICAL_TRAINING / MODULE_EXAM), `HomeroomAssignment` (one active per class). They are ended, never deleted.
 - **Grades:** `GradeReason` (configurable), `Grade` (1–10, CHECK constraint; original author immutable; soft delete), `GradeRevision` (immutable), `GradeCorrectionRequest`
+- **Results:** `AveragingRuleSet` (versioned, frozen after activation), `ModuleResultSnapshot` (immutable)
 - **Timetable:** `TimeSlot`, `TimetableVersion`, `TimetableEntry`, `TimetableOverride`, `TimetableImport`
 - **System:** `AuditLog`, `SystemSetting` (keys whitelisted and validated)
 - DB integrity (migration `20260923200500_integrity`): CHECK constraints, no-delete triggers, immutable revisions, grade identity (author/student/class/subject) immutable, single active year / enrollment / homeroom teacher, audit hash chain + `audit_log_verify_chain()`.
@@ -72,16 +73,33 @@ Two PostgreSQL roles are used: `catalog_owner` (migrations) and `catalog_app` (t
 | Timetable | all | all | own lessons | + own class | own class |
 
 ## Implemented API
-`/api/auth/{login,logout,me,change-password}` · `/api/admin/{users,users/[id],users/[id]/status,users/[id]/reset-password,ranks,companies,specializations,teachers,academic-years,academic-years/[id]/status,classes,classes/[id],subjects,subjects/[id],modules,modules/[id],students,assignments,assignments/[id]/end,homeroom-assignments,homeroom-assignments/[id]/end,settings,settings/[key],grade-reasons,grade-reasons/[id]}` · `/api/classes`, `/api/classes/[classId]`, `/api/classes/[classId]/subjects/[subjectId]/grades`, `/api/students/[studentId]`, `/api/grades` (POST), `/api/grade-reasons`, `/api/timetable`, `/api/me/grades`, `/api/audit`, `/api/audit/verify`.
+Phase 2: `/api/grades/[id]` (GET history, PATCH), `/api/grades/[id]/delete`, `/api/grades/mine`, `/api/corrections` (GET/POST), `/api/corrections/[id]`, `/api/corrections/[id]/review`, `/api/corrections/[id]/cancel`, `/api/classes/[id]/modules/[moduleId]/results`, `/api/admin/modules/[id]/subjects`, `/api/admin/module-subjects/[id]`, `/api/admin/students/[id]`, `/api/admin/subjects/[id]` (GET), `/api/admin/rule-sets`, `/api/admin/rule-sets/[id]/activate`.
+Phase 1: `/api/auth/{login,logout,me,change-password}` · `/api/admin/{users,users/[id],users/[id]/status,users/[id]/reset-password,ranks,companies,specializations,teachers,academic-years,academic-years/[id]/status,classes,classes/[id],subjects,subjects/[id],modules,modules/[id],students,assignments,assignments/[id]/end,homeroom-assignments,homeroom-assignments/[id]/end,settings,settings/[key],grade-reasons,grade-reasons/[id]}` · `/api/classes`, `/api/classes/[classId]`, `/api/classes/[classId]/subjects/[subjectId]/grades`, `/api/students/[studentId]`, `/api/grades` (POST), `/api/grade-reasons`, `/api/timetable`, `/api/me/grades`, `/api/audit`, `/api/audit/verify`.
 
-## Tests (67, all passing – `npm test`)
+## Tests (94, all passing – `npm test`)
+Each integration file starts from a fresh copy of a template database (`tests/db.ts`), so the tests are independent of each other.
+- `tests/unit/results-engine.test.ts`: rounding, weighted mean with the exam, missing items, rules changed without code.
+- `tests/integration/gradebook.test.ts`: valid/invalid grade, other class/subject, modify/delete with mandatory reason + audit + revisions, optimistic versioning, another teacher's grade (403/404), edit window → correction, conduct only by the class diriginte, practical training only by the assigned teacher, exam only by the designated examiner, correction workflow (approve/reject/cancel/delete), commander and administrator cannot edit/approve directly, module plan, closing a module → snapshot + grading blocked, conflicting assignments, students cannot be moved.
 - `tests/unit`: password policy, permission matrix.
 - `tests/integration/auth.test.ts`: valid/invalid login, unknown user, inactive user, brute force → 429, logout, forged/expired cookie, CSRF, mandatory password change, admin reset, deactivation revokes sessions, student accounts disabled, no password hashes in responses.
 - `tests/integration/authorization.test.ts`: teacher own class / another class / another subject / another student / another teacher in the timetable; diriginte own class / other class / conduct / subjects; administrator (management, no grades, no self-assignment); commander (global read, no writes); student isolation; losing access when an assignment ends.
 - `tests/integration/db-integrity.test.ts`: append-only audit (app role and owner), tamper detection, no deletion of historical data, grade identity immutable, 1–10 constraint, single active year/enrollment.
 
+## Phase 2 – Gradebook core (implemented)
+**Relationships:** Teacher → Subject → Module → Class → Academic year = `TeachingAssignment` (kind SUBJECT_TEACHING / PRACTICAL_TRAINING / MODULE_EXAM; `moduleId` null = all modules). A teacher can have any number of subjects/classes/modules. Conflicts rejected: one responsible teacher per (class, subject, kind, module scope); an "all modules" assignment overlaps module-specific ones. Substitutes: prepared through bounded validity (`validFrom/validTo`); a future `role = SUBSTITUTE` field will not change the model.
+**Module plan:** `ModuleSubject` (subject in module, `hasFinalExam`, weight, hours). A grade requires a valid module (same year and year of study as the class, OPEN) and a subject in the module plan (except conduct, which belongs to every module).
+**Grade rules (server):**
+- Create: an active assignment of exactly the required type (predare/practică/examinator for that module; diriginte for conduct) + an active enrollment of the student in the class + value 1–10 (integer by default) + valid reason for the grade type + date within the year and not in the future. Conduct and the module exam: one active grade per student/module.
+- Modify / delete: **only the author**, still assigned, open module, active year, within the `grades.editWindowDays` window (default 7) and with optimistic versioning. A **mandatory reason**. Deletion = soft delete (`status=DELETED`, who/when/why). Each change → immutable `GradeRevision` + audit with old/new value, student, class, subject, module, IP, user agent, session, request id.
+- Otherwise → **correction request** (409 `CORECTIE_NECESARA`).
+**Correction workflow:** the teacher who holds the assignment → `MODIFY`/`DELETE` request with justification (one pending request per grade) → **COMANDANT UNITATE** approves/rejects. The approval applies *exactly* the proposed value, atomically, through the same revision/audit path (the request is "claimed" atomically, so it cannot be applied twice). The commander cannot choose another value and has no direct editing endpoint. **The ADMINISTRATOR does not take part in the workflow** (the architecture does not require it): they have neither editing nor approval rights. Audit: `CORRECTION_REQUEST_CREATE/APPROVE/REJECT/CANCEL` + `GRADE_UPDATE/DELETE` with `approvedById`.
+**Results (configurable):** `src/server/results/engine.ts` (pure calculation) + `AveragingRuleSet` (versioned JSON, frozen after activation). Parameters: rounding, subject final (mean / weighted with exam, exam weight, minimum grades), conduct (last/mean, included or not), practical training (included or not), module average (simple mean / weighted by `ModuleSubject.weight`). The seed activates **provisional rules** (marked in the UI). Closing a module → immutable `ModuleResultSnapshot` for every class. Results visible to: commander (all), diriginte (own class).
+**Students:** create with enrollment, edit identity data; **there is no endpoint for moving between classes** (fields other than identity are rejected).
+
+## Phase 2 – UI (Romanian, responsive, light/dark)
+Next.js App Router + Tailwind 4, self-hosted Inter font, navy/gold identity, nonce-based CSP per request (`src/proxy.ts`). Pages: `/autentificare`, `/schimbare-parola`, `/panou` (by role), `/catalog`, `/catalog/clase/[id]`, `/catalog/clase/[id]/materii/[subjectId]` (grades + entry), `/catalog/note/[id]` (details, history, modify/delete/correction request), `/catalog/elevi/[id]`, `/catalog/clase/[id]/rezultate/[moduleId]` (print-ready), `/catalog/notele-mele`, `/cereri-corectie`, `/elev`, `/administrare/{elevi,materii,module,repartizari}`. Navigation is generated on the server from capabilities; pages call the services (the same authorization as the API) and turn 403/404 into a 404 page.
+
 ## Pending work (roadmap)
-2. **Gradebook core:** modify/delete grades with reason, correction requests, module results (configurable), catalog UI.
 3. **Academic years and timetable:** automatic promotion (idempotent), history, Excel import, weekly timetable.
 4. **UI/UX, dashboards, reports** (Excel/PDF/print), audit pages.
 5. **Security audit** + SECURITY.md.

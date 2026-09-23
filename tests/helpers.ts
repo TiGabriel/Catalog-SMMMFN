@@ -96,6 +96,8 @@ export async function fixtures() {
     },
     reasons: { testare: await reason("TESTARE"), purtare: await reason("NOTA_PURTARE") },
     moduleId: (await db.module.findFirstOrThrow({ where: { academicYearId: year.id, yearOfStudy: 1, order: 1 } })).id,
+    moduleId2: (await db.module.findFirstOrThrow({ where: { academicYearId: year.id, yearOfStudy: 2, order: 1 } })).id,
+    reasonExam: await reason("EXAMEN_MODUL"),
   };
 }
 

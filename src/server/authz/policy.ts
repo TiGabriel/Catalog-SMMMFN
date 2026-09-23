@@ -154,34 +154,57 @@ export function requiredAssignmentKind(subjectType: SubjectType, kind: GradeKind
   return subjectType === "PRACTICAL_TRAINING" ? "PRACTICAL_TRAINING" : "SUBJECT_TEACHING";
 }
 
+export type GradeTarget = {
+  classSectionId: string;
+  subjectId: string;
+  subjectType: SubjectType;
+  kind: GradeKind;
+  moduleId: string | null;
+};
+
 /**
- * Asserts the actor may create a grade for (class, subject, kind[, module]).
- * Returns the teaching assignment that grants it (null for homeroom/conduct).
- * Only PROFESOR accounts can ever pass: administrators and the commander have
- * no grade-creation permission at all.
+ * Finds the active grant that allows the actor to write a grade of this kind for
+ * (class, subject, module), or null. Pure lookup – callers decide how to deny.
+ * - SUBJECT_TEACHING / PRACTICAL_TRAINING: assignment for the class+subject, either
+ *   for all modules (moduleId null) or for exactly this module;
+ * - MODULE_EXAM: an examiner assignment for exactly this module;
+ * - conduct: an active homeroom assignment for the class.
  */
-export async function assertCanCreateGrade(
-  actor: Actor,
-  input: { classSectionId: string; subjectId: string; subjectType: SubjectType; kind: GradeKind; moduleId: string | null },
-): Promise<{ teachingAssignmentId: string | null }> {
+export async function findGradeGrant(actor: Actor, input: GradeTarget): Promise<{ teachingAssignmentId: string | null } | null> {
+  if (!hasPermission(actor, "grades.create.scoped")) return null;
+  const required = requiredAssignmentKind(input.subjectType, input.kind);
+  if (!required) return null;
+  const scope = await loadScope(actor);
+  if (required === "HOMEROOM") {
+    return hasPermission(actor, "grades.conduct.scoped") && scope.homeroomClassIds.has(input.classSectionId)
+      ? { teachingAssignmentId: null }
+      : null;
+  }
+  const grant = scope.teaching.find(
+    (t) =>
+      t.classSectionId === input.classSectionId &&
+      t.subjectId === input.subjectId &&
+      t.kind === required &&
+      (required === "MODULE_EXAM" ? t.moduleId === input.moduleId : t.moduleId === null || t.moduleId === input.moduleId),
+  );
+  return grant ? { teachingAssignmentId: grant.assignmentId } : null;
+}
+
+/**
+ * Asserts the actor may write a grade for (class, subject, kind, module).
+ * Only PROFESOR accounts can ever pass: administrators and the commander have
+ * no grade-writing permission at all (403); out-of-scope targets give 404.
+ */
+export async function assertCanCreateGrade(actor: Actor, input: GradeTarget): Promise<{ teachingAssignmentId: string | null }> {
   if (!hasPermission(actor, "grades.create.scoped")) {
     return deny(actor, "forbidden", { permission: "grades.create.scoped", ...input });
   }
-  const required = requiredAssignmentKind(input.subjectType, input.kind);
-  const scope = await loadScope(actor);
-  if (required === "HOMEROOM") {
-    if (hasPermission(actor, "grades.conduct.scoped") && scope.homeroomClassIds.has(input.classSectionId)) {
-      return { teachingAssignmentId: null };
-    }
-  } else if (required) {
-    const grant = scope.teaching.find(
-      (t) =>
-        t.classSectionId === input.classSectionId &&
-        t.subjectId === input.subjectId &&
-        t.kind === required &&
-        (required !== "MODULE_EXAM" || t.moduleId === input.moduleId),
-    );
-    if (grant) return { teachingAssignmentId: grant.assignmentId };
-  }
+  const grant = await findGradeGrant(actor, input);
+  if (grant) return grant;
   return deny(actor, "notFound", { resource: "GradeEntry", ...input });
+}
+
+/** Records an access denial and throws the given error (for service-level checks). */
+export async function denyWith(actor: Actor, kind: "forbidden" | "notFound", detail: Record<string, unknown>): Promise<never> {
+  return deny(actor, kind, detail);
 }

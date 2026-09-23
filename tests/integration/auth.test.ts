@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { GET as meRoute } from "@/app/api/auth/me/route";
 import { POST as logoutRoute } from "@/app/api/auth/logout/route";
 import { POST as loginRoute } from "@/app/api/auth/login/route";
@@ -8,6 +8,7 @@ import { POST as createUserRoute, GET as listUsersRoute } from "@/app/api/admin/
 import { POST as userStatusRoute } from "@/app/api/admin/users/[id]/status/route";
 import { POST as resetPasswordRoute } from "@/app/api/admin/users/[id]/reset-password/route";
 import { db } from "@/server/db/client";
+import { resetTestDb } from "../db";
 import { hashToken } from "@/server/auth/session";
 import { call, DEMO_PASSWORD, login, loginCookie, sessionCookieFrom, uniqueName } from "../helpers";
 
@@ -22,6 +23,10 @@ async function createStaff(adminCookie: string, role = "PROFESOR", password = "T
   expect(res.status, res.text).toBe(200);
   return { id: res.json.user.id as string, username, password };
 }
+
+beforeAll(async () => {
+  await resetTestDb();
+});
 
 describe("autentificare", () => {
   it("autentificare validă: cookie securizat, fără date sensibile în răspuns", async () => {
