@@ -11,13 +11,15 @@ export function buildNav(caps: Capabilities): NavGroup[] {
   if (caps.noteleMele) main.push({ href: "/elev", label: "Situația mea", icon: "user" });
   if (caps.orar) main.push({ href: "/orar", label: "Orar", icon: "calendar" });
   if (caps.cereriCorectie) main.push({ href: "/cereri-corectie", label: "Cereri de corecție", icon: "inbox" });
-  // Rapoarte and Jurnal de audit (phase 4)
+  if (caps.rapoarte) main.push({ href: "/rapoarte", label: "Rapoarte", icon: "chart" });
+  if (caps.audit) main.push({ href: "/audit", label: caps.administrare ? "Jurnal de audit" : "Audit note", icon: "shield" });
 
   const groups: NavGroup[] = [{ items: main }];
   if (caps.administrare) {
     groups.push({
       title: "Administrare",
       items: [
+        { href: "/administrare/utilizatori", label: "Utilizatori", icon: "users" },
         { href: "/administrare/ani-scolari", label: "Ani școlari", icon: "archive" },
         { href: "/administrare/clase", label: "Clase", icon: "layers" },
         { href: "/administrare/elevi", label: "Elevi", icon: "graduation" },
@@ -25,6 +27,7 @@ export function buildNav(caps: Capabilities): NavGroup[] {
         { href: "/administrare/module", label: "Module", icon: "grid" },
         { href: "/administrare/repartizari", label: "Repartizări", icon: "link" },
         { href: "/administrare/orar", label: "Orar (import)", icon: "upload" },
+        { href: "/administrare/configurare", label: "Configurare", icon: "settings" },
       ],
     });
   }

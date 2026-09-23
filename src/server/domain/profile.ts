@@ -36,7 +36,7 @@ export async function getCapabilities(actor: Actor): Promise<Capabilities> {
     introducereNote: hasPermission(actor, "grades.create.scoped"),
     cereriCorectie: hasPermission(actor, "corrections.request") || hasPermission(actor, "corrections.review"),
     aprobaCorecturi: hasPermission(actor, "corrections.review"),
-    rapoarte: hasPermission(actor, "academic.read.all") || (!!scope && scope.homeroomClassIds.size > 0) || scoped,
+    rapoarte: hasPermission(actor, "academic.read.all") || scoped,
   };
 }
 

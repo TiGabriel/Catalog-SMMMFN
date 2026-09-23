@@ -41,3 +41,11 @@ describe("matricea rol → permisiuni", () => {
     expect(requiredAssignmentKind("GENERAL", "FINAL")).toBe(null);
   });
 });
+
+describe("auditul de sistem", () => {
+  it("doar administratorul are acces la auditul complet al sistemului", async () => {
+    const { ROLE_PERMISSIONS: RP } = await import("@/server/authz/permissions");
+    const roles = Object.entries(RP).filter(([, ps]) => ps.includes("audit.read.system")).map(([r]) => r);
+    expect(roles).toEqual(["ADMINISTRATOR"]);
+  });
+});

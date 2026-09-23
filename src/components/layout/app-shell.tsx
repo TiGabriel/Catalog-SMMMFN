@@ -10,7 +10,7 @@ export function AppShell({ actor, caps, children }: { actor: Actor; caps: Capabi
   return (
     <div className="min-h-screen">
       <Sidebar groups={buildNav(caps)} />
-      <div className="lg:pl-64">
+      <div className="lg:pl-64 print:pl-0">
         <header className="no-print sticky top-0 z-20 hidden items-center justify-between gap-4 border-b border-border bg-surface/85 px-6 py-3 backdrop-blur lg:flex">
           <p className="truncate text-sm text-muted">Școala Militară de Maiștri Militari a Forțelor Navale „Amiral Ion Murgescu”</p>
           <UserMenu displayName={actorDisplayName(actor)} />

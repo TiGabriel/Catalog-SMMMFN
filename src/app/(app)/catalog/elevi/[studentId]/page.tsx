@@ -5,6 +5,7 @@ import { getPageContext, load } from "@/server/http/page";
 import { getStudentOverview } from "@/server/domain/catalog";
 import { GRADE_KIND_LABEL, STUDENT_STATUS_LABEL, formatDate } from "@/lib/format";
 import { PrintButton } from "@/components/print-button";
+import { ButtonLink } from "@/components/ui";
 
 export const metadata: Metadata = { title: "Situația elevului" };
 
@@ -32,7 +33,13 @@ export default async function StudentPage({ params }: { params: Promise<{ studen
         ]}
         title={`${s.rank?.label ? s.rank.label + " " : ""}${s.lastName} ${s.firstName}`}
         subtitle={`${cls ? `Clasa ${cls.code} · ` : ""}Nr. matricol ${s.registryNumber ?? "—"} · ${STUDENT_STATUS_LABEL[s.status]}`}
-        actions={<PrintButton />}
+        actions={
+          <>
+            {data.gradesVisible && <ButtonLink href={`/rapoarte/situatie-elev?elev=${s.id}`} variant="secondary">Raport situație</ButtonLink>}
+            {caps.catalogGeneral && <ButtonLink href={`/rapoarte/foaie-matricola?elev=${s.id}`} variant="secondary">Foaie matricolă</ButtonLink>}
+            <PrintButton />
+          </>
+        }
       />
       <Card className="print-plain">
         <CardHeader title="Situația școlară – anul curent" description={caps.catalogGeneral ? "Toate materiile" : "Materiile pe care le puteți vedea"} className="no-print" />

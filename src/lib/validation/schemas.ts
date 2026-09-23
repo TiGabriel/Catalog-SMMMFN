@@ -239,6 +239,10 @@ export const auditQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(200).default(50),
   action: z.string().regex(/^[A-Z_]{2,40}$/).optional(),
   actorId: uuid.optional(),
+  studentId: uuid.optional(),
+  classSectionId: uuid.optional(),
+  subjectId: uuid.optional(),
+  academicYearId: uuid.optional(),
   from: isoDate.optional(),
   to: isoDate.optional(),
 });

@@ -18,6 +18,7 @@ export const PERMISSIONS = [
   "config.read",
   "config.manage",
   "audit.read",
+  "audit.read.system",
   "academic.read.all",
   "academic.read.scoped",
   "grades.create.scoped",
@@ -42,6 +43,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "config.read",
     "config.manage",
     "audit.read",
+    "audit.read.system", // complete system audit (logins, users, configuration, …)
     "timetable.read.all",
     "timetable.manage",
     // Deliberately absent: academic.read.*, grades.* – the administrator never edits grades.
@@ -49,9 +51,9 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   COMANDANT_UNITATE: [
     "structure.read",
     "config.read",
-    "audit.read",
+    "audit.read", // academic audit only: grades, corrections, approvals, module closing, year transition
     "academic.read.all",
-    "corrections.review", // reserved: approval workflow arrives in phase 4
+    "corrections.review",
     "timetable.read.all",
   ],
   PROFESOR: [

@@ -31,6 +31,10 @@ export const ruleDefinitionSchema = z.strictObject({
   moduleAverage: z.strictObject({
     strategy: z.enum(["MEAN_OF_FINALS", "WEIGHTED_BY_MODULE_SUBJECT"]),
   }),
+  /** Annual average from module averages (optional for rule sets created before it existed). */
+  annualAverage: z
+    .strictObject({ strategy: z.enum(["MEAN_OF_MODULES"]), requireAllModules: z.boolean() })
+    .default({ strategy: "MEAN_OF_MODULES", requireAllModules: true }),
 });
 
 export type RuleDefinition = z.infer<typeof ruleDefinitionSchema>;
@@ -42,6 +46,7 @@ export const PROVISIONAL_RULES: RuleDefinition = {
   conduct: { strategy: "LAST", includeInModuleAverage: false },
   practicalTraining: { includeInModuleAverage: true },
   moduleAverage: { strategy: "MEAN_OF_FINALS" },
+  annualAverage: { strategy: "MEAN_OF_MODULES", requireAllModules: true },
 };
 
 export const PROVISIONAL_RULESET_NAME = "Reguli provizorii";
