@@ -57,7 +57,9 @@ export const SECURITY = {
     maxFailuresPerIp: 20,
   },
   api: {
-    /** Coarse per-IP request limit for API routes (requests per minute). */
+    /** Coarse per-IP request limit for API routes (requests per minute; only behind a trusted proxy). */
     requestsPerMinute: 300,
+    /** Per-session request limit (requests per minute). */
+    requestsPerMinutePerSession: 240,
   },
 } as const;

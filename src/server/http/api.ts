@@ -11,6 +11,9 @@ import type { Permission } from "@/server/authz/permissions";
 import { requestMetaFromHeaders, type RequestMeta } from "@/server/http/request-meta";
 import { hitRateLimit } from "@/server/http/rate-limit";
 import "@/lib/validation/zod-ro";
+import { safeErrorForLog } from "@/server/log";
+
+export { safeErrorForLog };
 
 type RouteParams = Record<string, string>;
 type RouteContext = { params: Promise<RouteParams> };
@@ -75,13 +78,31 @@ export function zodDetails(err: z.ZodError): Record<string, string[]> {
   return out;
 }
 
+/** Reads the body as text, aborting as soon as it exceeds `limit` bytes (also for chunked requests). */
+async function readBodyLimited(req: NextRequest, limit: number): Promise<string> {
+  if (!req.body) return "";
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) {
+      await reader.cancel().catch(() => {});
+      throw Errors.validation(undefined, "Cererea este prea mare.");
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 export async function readJson<T extends z.ZodType>(req: NextRequest, schema: T): Promise<z.infer<T>> {
   const len = Number(req.headers.get("content-length") ?? "0");
   if (len > MAX_JSON_BYTES) throw Errors.validation(undefined, "Cererea este prea mare.");
+  const text = await readBodyLimited(req, MAX_JSON_BYTES);
   let raw: unknown;
   try {
-    const text = await req.text();
-    if (text.length > MAX_JSON_BYTES) throw new Error("too large");
     raw = text ? JSON.parse(text) : {};
   } catch {
     throw Errors.validation(undefined, "Conținutul cererii nu este JSON valid.");
@@ -116,6 +137,8 @@ function wrap(options: Options, handler: AuthedHandler | PublicHandler) {
       } else {
         const actor = await resolveSession(readSessionToken(req), meta);
         if (!actor) throw Errors.unauthenticated();
+        // Per-session limit – effective even when the client IP is unknown.
+        if (hitRateLimit(`session:${actor.sessionId}`, SECURITY.api.requestsPerMinutePerSession)) throw Errors.rateLimited();
         if (actor.mustChangePassword && !options.allowPendingPasswordChange) throw Errors.passwordChangeRequired();
         if (options.permission) await assertPermission(actor, options.permission);
         result = await (handler as AuthedHandler)({ req, actor, params, meta });
@@ -127,7 +150,7 @@ function wrap(options: Options, handler: AuthedHandler | PublicHandler) {
       return res;
     } catch (err) {
       const appErr = mapError(err);
-      if (appErr.status >= 500) console.error(`[api] ${req.method} ${req.nextUrl.pathname} ${meta.requestId}`, err);
+      if (appErr.status >= 500) console.error(`[api] ${req.method} ${req.nextUrl.pathname} ${meta.requestId}`, safeErrorForLog(err));
       return errorResponse(appErr, meta.requestId);
     }
   };

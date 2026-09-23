@@ -25,19 +25,44 @@ export const ACADEMIC_AUDIT_ACTIONS = [
   AuditAction.CORRECTION_REQUEST_CANCEL,
   AuditAction.MODULE_CLOSE,
   AuditAction.YEAR_ROLLOVER,
+  // Oversight of administrator actions that affect who may grade and how results are computed
+  // (separation of duties: the commander can detect a staged teacher account/assignment).
+  AuditAction.ASSIGNMENT_CREATE,
+  AuditAction.ASSIGNMENT_END,
+  AuditAction.HOMEROOM_CREATE,
+  AuditAction.HOMEROOM_END,
+  AuditAction.RULESET_CREATE,
+  AuditAction.RULESET_ACTIVATE,
+  AuditAction.ACADEMIC_YEAR_UPDATE,
+  AuditAction.CONFIG_UPDATE, // only grade-related settings (see below)
+  AuditAction.PASSWORD_RESET, // only for teacher accounts (see below)
 ] as string[];
 
 export function allowedAuditActions(actor: Actor): string[] | "ALL" {
   return hasPermission(actor, "audit.read.system") ? "ALL" : ACADEMIC_AUDIT_ACTIONS;
 }
 
+/** Row-level scope of the commander's audit view (no system events, no administrator accounts). */
+async function academicScope(): Promise<Prisma.AuditLogWhereInput> {
+  const teachers = await db.user.findMany({ where: { role: "PROFESOR" }, select: { id: true } });
+  const plain = ACADEMIC_AUDIT_ACTIONS.filter((a) => a !== AuditAction.CONFIG_UPDATE && a !== AuditAction.PASSWORD_RESET);
+  return {
+    OR: [
+      { action: { in: plain } },
+      { action: AuditAction.CONFIG_UPDATE, entityId: { startsWith: "grades." } },
+      { action: AuditAction.PASSWORD_RESET, entityId: { in: teachers.map((t) => t.id) } },
+    ],
+  };
+}
+
 export async function listAuditEntries(actor: Actor, query: z.infer<typeof auditQuerySchema>) {
   await assertPermission(actor, "audit.read");
   const allowed = allowedAuditActions(actor);
   const full = allowed === "ALL";
-  const actionFilter: Prisma.StringFilter | string | undefined =
-    query.action !== undefined ? (full || allowed.includes(query.action) ? query.action : "__NONE__") : full ? undefined : { in: allowed };
+  const actionFilter: string | undefined =
+    query.action !== undefined ? (full || allowed.includes(query.action) ? query.action : "__NONE__") : undefined;
   const where: Prisma.AuditLogWhereInput = {
+    ...(full ? {} : { AND: [await academicScope()] }),
     action: actionFilter,
     actorId: query.actorId,
     studentId: query.studentId,

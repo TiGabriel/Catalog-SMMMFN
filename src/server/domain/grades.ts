@@ -123,6 +123,15 @@ export async function createGrade(actor: Actor, input: z.infer<typeof createGrad
   }
 
   return db.$transaction(async (tx) => {
+    if (input.kind !== "CURRENT") {
+      // Serialize concurrent requests and re-check inside the transaction (no duplicate conduct/exam grade).
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`grade-single:${input.studentId}:${subject.id}:${input.moduleId}:${input.kind}`}))`;
+      const dup = await tx.grade.findFirst({
+        where: { studentId: input.studentId, subjectId: subject.id, moduleId: input.moduleId, kind: input.kind, status: "ACTIVE" },
+        select: { id: true },
+      });
+      if (dup) throw Errors.conflict("Elevul are deja această notă în modul. Folosiți modificarea notei.");
+    }
     const grade = await tx.grade.create({
       data: {
         studentId: input.studentId,

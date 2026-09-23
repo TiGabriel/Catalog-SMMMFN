@@ -151,15 +151,19 @@ describe("autentificare", () => {
     expect(weak.status).toBe(400);
     const wrongCurrent = await call(changePasswordRoute, "POST", "/api/auth/change-password", {
       cookie,
-      body: { currentPassword: "Gresita#2026", newPassword: "NouaParola#2026" },
+      body: { currentPassword: "Gresita#2026", newPassword: "NouaCheie#2026" },
     });
     expect(wrongCurrent.status).toBe(400);
     const ok = await call(changePasswordRoute, "POST", "/api/auth/change-password", {
       cookie,
-      body: { currentPassword: u.password, newPassword: "NouaParola#2026" },
+      body: { currentPassword: u.password, newPassword: "NouaCheie#2026" },
     });
     expect(ok.status, ok.text).toBe(200);
-    expect((await call(classesRoute, "GET", "/api/classes", { cookie })).status).toBe(200);
+    // The session is rotated: the old token is dead, the new cookie works.
+    expect((await call(classesRoute, "GET", "/api/classes", { cookie })).status).toBe(401);
+    const rotated = sessionCookieFrom(ok.headers.get("set-cookie"));
+    expect(rotated).not.toBe(cookie);
+    expect((await call(classesRoute, "GET", "/api/classes", { cookie: rotated })).status).toBe(200);
 
     // Admin reset → all sessions of the user are revoked and a change is required again.
     const reset = await call(resetPasswordRoute, "POST", `/api/admin/users/${u.id}/reset-password`, {
@@ -168,7 +172,7 @@ describe("autentificare", () => {
       body: { temporaryPassword: "Resetata#2026" },
     });
     expect(reset.status).toBe(200);
-    expect((await call(meRoute, "GET", "/api/auth/me", { cookie })).status).toBe(401);
+    expect((await call(meRoute, "GET", "/api/auth/me", { cookie: rotated })).status).toBe(401);
     expect((await login(u.username, "Resetata#2026")).json.mustChangePassword).toBe(true);
     const audit = await db.auditLog.findFirst({ where: { action: "PASSWORD_RESET", entityId: u.id } });
     expect(JSON.stringify({ ...audit, id: String(audit?.id) })).not.toContain("Resetata#2026");

@@ -1,6 +1,7 @@
 import "server-only";
 import { db } from "@/server/db/client";
 import { runAutomaticRollover } from "@/server/domain/rollover";
+import { safeErrorForLog } from "@/server/log";
 
 /**
  * In-process scheduler of the Node.js server (started from src/instrumentation.ts).
@@ -15,7 +16,7 @@ async function rolloverJob() {
     const res = await runAutomaticRollover("AUTO");
     if (res.status === "EXECUTED") console.info(`[jobs] trecerea în anul școlar ${res.toYear} a fost efectuată automat`, res.summary);
   } catch (err) {
-    console.error("[jobs] trecerea automată în noul an școlar a eșuat", err);
+    console.error("[jobs] trecerea automată în noul an școlar a eșuat", safeErrorForLog(err));
   }
 }
 
@@ -25,7 +26,7 @@ async function housekeepingJob() {
     await db.session.deleteMany({ where: { OR: [{ expiresAt: { lt: cutoff } }, { revokedAt: { lt: cutoff } }] } });
     await db.loginAttempt.deleteMany({ where: { at: { lt: new Date(Date.now() - 180 * 24 * HOUR) } } });
   } catch (err) {
-    console.error("[jobs] curățarea sesiunilor expirate a eșuat", err);
+    console.error("[jobs] curățarea sesiunilor expirate a eșuat", safeErrorForLog(err));
   }
 }
 

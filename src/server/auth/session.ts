@@ -3,6 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { db, type DbOrTx } from "@/server/db/client";
 import { config, SECURITY } from "@/server/config";
 import type { Actor } from "@/server/authz/actor";
+import { getSetting } from "@/server/domain/settings";
 import type { RequestMeta } from "@/server/http/request-meta";
 
 export function sessionCookieName(): string {
@@ -72,7 +73,9 @@ export async function resolveSession(token: string | undefined | null, meta: Req
     });
     return null;
   }
-  if (session.user.status !== "ACTIVE") {
+  // Student sessions end as soon as student accounts are disabled.
+  const inactiveStudent = session.user.role === "ELEV" && !(await getSetting("features.studentAccounts"));
+  if (session.user.status !== "ACTIVE" || inactiveStudent) {
     await db.session.updateMany({
       where: { id, revokedAt: null },
       data: { revokedAt: new Date(), revokeReason: "USER_NOT_ACTIVE" },

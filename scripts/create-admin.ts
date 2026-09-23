@@ -13,6 +13,40 @@ import { ARGON2_OPTIONS } from "../src/server/auth/argon2-options";
 import { passwordPolicyErrors } from "../src/lib/validation/password";
 import { normalizeUsername, USERNAME_REGEX } from "../src/lib/validation/common";
 
+/** Reads a line without echoing it to the terminal (passwords). */
+function askHidden(question: string): Promise<string> {
+  return new Promise((resolve) => {
+    if (!stdin.isTTY) {
+      const rl = createInterface({ input: stdin });
+      rl.once("line", (l) => {
+        rl.close();
+        resolve(l);
+      });
+      return;
+    }
+    stdout.write(question);
+    stdin.setRawMode(true);
+    stdin.resume();
+    let value = "";
+    const onData = (buf: Buffer) => {
+      for (const ch of buf.toString("utf8")) {
+        if (ch === "\r" || ch === "\n") {
+          stdin.setRawMode(false);
+          stdin.pause();
+          stdin.off("data", onData);
+          stdout.write("\n");
+          resolve(value);
+          return;
+        }
+        if (ch === "\u0003") process.exit(1); // Ctrl+C
+        if (ch === "\u007f") value = value.slice(0, -1);
+        else value += ch;
+      }
+    };
+    stdin.on("data", onData);
+  });
+}
+
 async function main() {
   const rl = createInterface({ input: stdin, output: stdout });
   const ask = async (env: string, q: string) => process.env[env] ?? (await rl.question(q)).trim();
@@ -20,7 +54,8 @@ async function main() {
     const username = normalizeUsername(await ask("ADMIN_USERNAME", "Nume de utilizator: "));
     const firstName = await ask("ADMIN_FIRST_NAME", "Prenume: ");
     const lastName = await ask("ADMIN_LAST_NAME", "Nume: ");
-    const password = await ask("ADMIN_PASSWORD", "Parolă (minim 8 caractere, majusculă, cifră, caracter special): ");
+    rl.pause();
+    const password = process.env.ADMIN_PASSWORD ?? (await askHidden("Parolă (minim 8 caractere, majusculă, cifră, caracter special): "));
     if (!USERNAME_REGEX.test(username)) throw new Error("Nume de utilizator invalid.");
     if (!firstName || !lastName) throw new Error("Numele și prenumele sunt obligatorii.");
     const errors = passwordPolicyErrors(password, username);

@@ -4,6 +4,8 @@ Detailed design for the electronic gradebook of **Școala Militară de Maiștri 
 This is the reference design. `PROJECT_STATUS.md` holds the short summary and progress tracking.
 
 > Documentation is in English for developers. **All user-facing UI text is in Romanian.**
+>
+> This is the original (phase 0) design. Deviations made during implementation are recorded in `PROJECT_STATUS.md`. The main ones: the year transition runs automatically on 1 September by default, the commander's audit view is limited to academic events plus oversight of grading-relevant administrator actions, and PDF output comes from print-optimized pages.
 
 ---
 

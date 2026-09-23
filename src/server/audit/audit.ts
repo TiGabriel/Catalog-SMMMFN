@@ -127,6 +127,6 @@ export async function recordAuditSafe(actor: AuditActor | null, meta: RequestMet
   try {
     await recordAudit(db, actor, meta, entry);
   } catch (err) {
-    console.error("[audit] failed to record entry", entry.action, meta?.requestId, err);
+    console.error("[audit] failed to record entry", entry.action, meta?.requestId, err instanceof Error ? err.name : "error");
   }
 }

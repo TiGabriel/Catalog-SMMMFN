@@ -3,7 +3,7 @@
 Electronic gradebook for **Școala Militară de Maiștri Militari a Forțelor Navale „Amiral Ion Murgescu”**. The UI is entirely in Romanian.
 The full design is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-_Last updated: 2026-09-23. Phase: **4 – Dashboards, reports and final UI (completed)**_
+_Last updated: 2026-09-23. Phase: **5 – Security audit (completed)**_
 
 ## Current state
 - Next.js 16 (App Router) + TypeScript, PostgreSQL 16 with Prisma 7 (`@prisma/adapter-pg`), Zod 4, argon2id, Vitest 5.
@@ -76,7 +76,8 @@ Two PostgreSQL roles are used: `catalog_owner` (migrations) and `catalog_app` (t
 Phase 2: `/api/grades/[id]` (GET history, PATCH), `/api/grades/[id]/delete`, `/api/grades/mine`, `/api/corrections` (GET/POST), `/api/corrections/[id]`, `/api/corrections/[id]/review`, `/api/corrections/[id]/cancel`, `/api/classes/[id]/modules/[moduleId]/results`, `/api/admin/modules/[id]/subjects`, `/api/admin/module-subjects/[id]`, `/api/admin/students/[id]`, `/api/admin/subjects/[id]` (GET), `/api/admin/rule-sets`, `/api/admin/rule-sets/[id]/activate`.
 Phase 1: `/api/auth/{login,logout,me,change-password}` · `/api/admin/{users,users/[id],users/[id]/status,users/[id]/reset-password,ranks,companies,specializations,teachers,academic-years,academic-years/[id]/status,classes,classes/[id],subjects,subjects/[id],modules,modules/[id],students,assignments,assignments/[id]/end,homeroom-assignments,homeroom-assignments/[id]/end,settings,settings/[key],grade-reasons,grade-reasons/[id]}` · `/api/classes`, `/api/classes/[classId]`, `/api/classes/[classId]/subjects/[subjectId]/grades`, `/api/students/[studentId]`, `/api/grades` (POST), `/api/grade-reasons`, `/api/timetable`, `/api/me/grades`, `/api/audit`, `/api/audit/verify`.
 
-## Tests (120, all passing – `npm test`)
+## Tests (134, all passing – `npm test`)
+- `tests/integration/security.test.ts`: session fixation and rotation, parallel brute force, credentials not stored in the audit, student sessions when the feature is disabled, weak passwords, per-session limit, chunked JSON bodies, zip bomb with false sizes, security headers, IDOR on grades, commander oversight of the administrator (without data about administrators), concurrent conduct grades, history kept after deactivating/deleting teacher and student accounts.
 - `tests/integration/reports-audit.test.ts`: reports per role (teacher only own classes/subjects, including Excel; diriginte own class; commander everything; administrator no grades; student only their own record sheet), invalid parameters, formula injection in Excel; audit: 403 for normal users, the commander only academic and without technical data, the administrator complete, all filters.
 - `tests/integration/rollover.test.ts`: 1xy→2xy mapping with the same cohort, promotion exactly once (concurrent runs), not before 1 September / only by admin, graduation + account deactivation, history preserved (grades, revisions, assignments, snapshots, audit), history access (commander yes, teacher no, new assignments do not change the past).
 - `tests/integration/timetable.test.ts`: template, row-level validation (class/day/slot/subject/teacher/inactive teacher/conflicts/formulas/odd-even), non-Excel files, missing columns, macros and zip bombs, dates outside the year, resolution per week, odd/even weeks, teacher isolation, versions (a new upload does not destroy, archive restores, republish), authorization (403 for non-admins, foreign Origin).
@@ -114,7 +115,7 @@ Next.js App Router + Tailwind 4, self-hosted Inter font, navy/gold identity, non
 **Dependencies:** `exceljs` (with the `uuid` override to a patched version). Overrides for `deepmerge-ts`/`mysql2` (transitive dependencies of the Prisma CLI) → `npm audit`: 0 vulnerabilities.
 
 ## Pending work (roadmap)
-5. **Security audit** + SECURITY.md.
+- Before production: 2FA for ADMINISTRATOR / COMANDANT UNITATE, deployment (Docker + reverse proxy + backups), official rules and data (averages, time slots, ranks, specializations), UI for repeating students, audit retention policy.
 
 ## Important security decisions
 - The permission matrix lives in code, not in the DB (it cannot be escalated through configuration).
