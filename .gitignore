@@ -1,11 +1,45 @@
+# Dependencies
 node_modules/
+.pnpm-store/
+
+# Builds / generated
 .next/
 out/
 dist/
+build/
 coverage/
-*.log
+*.tsbuildinfo
+next-env.d.ts
+/src/generated/
+
+# Environment / secrets – never commit (.env.test only holds local test-DB credentials)
 .env
 .env.*
 !.env.example
-.DS_Store
+!.env.test
+*.pem
+*.key
+
+# Uploads, backups, local data
 /uploads/
+backups/
+*.dump
+*.sql.gz
+pgdata/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Test output
+playwright-report/
+test-results/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/*
+!.vscode/extensions.json
