@@ -4,7 +4,7 @@ import { ChevronRight } from "lucide-react";
 import { Badge, ButtonLink, Card, CardHeader, EmptyState, PageHeader, TableWrap } from "@/components/ui";
 import { getPageContext, load } from "@/server/http/page";
 import { getClassOverview } from "@/server/domain/catalog";
-import { MODULE_STATUS_LABEL, SUBJECT_TYPE_LABEL, personName } from "@/lib/format";
+import { MODULE_STATUS_LABEL, SUBJECT_TYPE_LABEL, personName, plural } from "@/lib/format";
 
 export const metadata: Metadata = { title: "Clasa" };
 
@@ -75,7 +75,7 @@ export default async function ClassPage({ params }: { params: Promise<{ classId:
         </Card>
 
         <Card className="lg:col-span-3">
-          <CardHeader title="Elevi" description={`${data.students.length} elevi înmatriculați`} />
+          <CardHeader title="Elevi" description={`${plural(data.students.length, "elev înmatriculat", "elevi înmatriculați")}`} />
           {data.students.length === 0 ? (
             <EmptyState title="Clasa nu are elevi înmatriculați." />
           ) : (

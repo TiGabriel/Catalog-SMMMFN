@@ -22,6 +22,8 @@ type Options = {
   permission?: Permission;
   /** Allowed while the user still has to change the password (login/logout/me/change-password). */
   allowPendingPasswordChange?: boolean;
+  /** Accept multipart/form-data bodies (file uploads) instead of JSON. */
+  multipart?: boolean;
 };
 
 type AuthedHandler = (ctx: { req: NextRequest; actor: Actor; params: RouteParams; meta: RequestMeta }) => Promise<unknown>;
@@ -37,14 +39,15 @@ function errorResponse(err: AppError, requestId: string) {
   );
 }
 
-/** CSRF defence for state-changing requests: exact Origin match + JSON content type. */
-function assertSameOrigin(req: NextRequest) {
+/** CSRF defence for state-changing requests: exact Origin match + expected content type. */
+function assertSameOrigin(req: NextRequest, multipart: boolean) {
   const origin = req.headers.get("origin");
   if (!origin || origin !== config().appOrigin) throw Errors.csrf();
   const hasBody = req.headers.get("content-length") !== "0" && req.body !== null;
   if (hasBody) {
-    const ct = req.headers.get("content-type") ?? "";
-    if (!ct.toLowerCase().startsWith("application/json")) throw Errors.unsupportedMediaType();
+    const ct = (req.headers.get("content-type") ?? "").toLowerCase();
+    const ok = multipart ? ct.startsWith("multipart/form-data") : ct.startsWith("application/json");
+    if (!ok) throw Errors.unsupportedMediaType();
   }
 }
 
@@ -104,7 +107,7 @@ function wrap(options: Options, handler: AuthedHandler | PublicHandler) {
     const meta = requestMetaFromHeaders(req.headers);
     try {
       if (meta.ip && hitRateLimit(`api:${meta.ip}`, SECURITY.api.requestsPerMinute)) throw Errors.rateLimited();
-      if (!SAFE_METHODS.has(req.method)) assertSameOrigin(req);
+      if (!SAFE_METHODS.has(req.method)) assertSameOrigin(req, !!options.multipart);
       const params = (await context?.params) ?? {};
 
       let result: unknown;

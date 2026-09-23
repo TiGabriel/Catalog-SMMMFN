@@ -29,8 +29,8 @@ export const SETTING_DEFINITIONS = {
   },
   "rollover.mode": {
     schema: z.enum(["MANUAL_CONFIRM", "AUTO"]),
-    default: "MANUAL_CONFIRM",
-    description: "Trecerea în noul an școlar: cu confirmare din partea administratorului sau automat la 1 septembrie.",
+    default: "AUTO",
+    description: "Trecerea în noul an școlar: automat la 1 septembrie (implicit) sau doar la confirmarea administratorului.",
   },
   "school.classSuffixes": {
     schema: z.array(z.string().regex(/^[0-9]{2}$/)).min(1).max(30),

@@ -2,6 +2,7 @@ import "server-only";
 import type { AssignmentKind } from "@/generated/prisma/enums";
 import { db } from "@/server/db/client";
 import type { Actor } from "@/server/authz/actor";
+import { schoolDate } from "@/server/time";
 
 export type TeachingGrant = {
   assignmentId: string;
@@ -23,9 +24,9 @@ export type AccessScope = {
   studentClassIds: Set<string>;
 };
 
+/** Today's date in the school's timezone, as a UTC-midnight Date (like DATE columns). */
 export function todayUtc(): Date {
-  const now = new Date();
-  return new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+  return schoolDate();
 }
 
 /** SQL-level definition of "active assignment" (shared by teaching and homeroom). */

@@ -9,10 +9,12 @@ import type { createStudentSchema, updateStudentSchema } from "@/lib/validation/
 import { todayUtc } from "@/server/authz/scope";
 
 /** Administrative student list (roster only – no grades). */
-export async function listStudentsAdmin(actor: Actor, classSectionId?: string) {
+export async function listStudentsAdmin(actor: Actor, classSectionId?: string, historical = false) {
   await assertPermission(actor, "structure.read");
+  // For a closed year, list everyone who finished the year in that class (promoted/graduated/…).
+  const statusFilter = historical ? { notIn: ["WITHDRAWN", "TRANSFERRED"] as ("WITHDRAWN" | "TRANSFERRED")[] } : ("ACTIVE" as const);
   return db.student.findMany({
-    where: classSectionId ? { enrollments: { some: { classSectionId, status: "ACTIVE" } } } : {},
+    where: classSectionId ? { enrollments: { some: { classSectionId, status: statusFilter } } } : {},
     select: {
       id: true,
       firstName: true,

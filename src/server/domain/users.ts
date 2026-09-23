@@ -5,7 +5,7 @@ import type { Role, UserStatus } from "@/generated/prisma/enums";
 import { db } from "@/server/db/client";
 import { Errors } from "@/server/errors";
 import { recordAudit, AuditAction } from "@/server/audit/audit";
-import { assertPermission } from "@/server/authz/policy";
+import { assertPermission, hasPermission } from "@/server/authz/policy";
 import type { Actor } from "@/server/authz/actor";
 import { hashPassword } from "@/server/auth/password";
 import { revokeAllUserSessions } from "@/server/auth/session";
@@ -219,4 +219,14 @@ export async function resetPassword(actor: Actor, id: string, temporaryPassword:
 
 export async function listRanks() {
   return db.rank.findMany({ where: { active: true }, orderBy: { sortOrder: "asc" }, select: { id: true, label: true, category: true } });
+}
+
+/** Teachers for filters of global views (administrator, commander). Names only. */
+export async function listTeachersForFilter(actor: Actor) {
+  if (!hasPermission(actor, "timetable.read.all")) await assertPermission(actor, "timetable.read.all");
+  return db.user.findMany({
+    where: { role: "PROFESOR", status: { not: "DELETED" } },
+    select: { id: true, firstName: true, lastName: true, rank: { select: { label: true } } },
+    orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+  });
 }

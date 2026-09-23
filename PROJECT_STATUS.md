@@ -3,7 +3,7 @@
 Electronic gradebook for **Școala Militară de Maiștri Militari a Forțelor Navale „Amiral Ion Murgescu”**. The UI is entirely in Romanian.
 The full design is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-_Last updated: 2026-09-23. Phase: **2 – Gradebook core (completed)**_
+_Last updated: 2026-09-23. Phase: **3 – Academic years, promotion, history, timetable (completed)**_
 
 ## Current state
 - Next.js 16 (App Router) + TypeScript, PostgreSQL 16 with Prisma 7 (`@prisma/adapter-pg`), Zod 4, argon2id, Vitest 5.
@@ -76,7 +76,9 @@ Two PostgreSQL roles are used: `catalog_owner` (migrations) and `catalog_app` (t
 Phase 2: `/api/grades/[id]` (GET history, PATCH), `/api/grades/[id]/delete`, `/api/grades/mine`, `/api/corrections` (GET/POST), `/api/corrections/[id]`, `/api/corrections/[id]/review`, `/api/corrections/[id]/cancel`, `/api/classes/[id]/modules/[moduleId]/results`, `/api/admin/modules/[id]/subjects`, `/api/admin/module-subjects/[id]`, `/api/admin/students/[id]`, `/api/admin/subjects/[id]` (GET), `/api/admin/rule-sets`, `/api/admin/rule-sets/[id]/activate`.
 Phase 1: `/api/auth/{login,logout,me,change-password}` · `/api/admin/{users,users/[id],users/[id]/status,users/[id]/reset-password,ranks,companies,specializations,teachers,academic-years,academic-years/[id]/status,classes,classes/[id],subjects,subjects/[id],modules,modules/[id],students,assignments,assignments/[id]/end,homeroom-assignments,homeroom-assignments/[id]/end,settings,settings/[key],grade-reasons,grade-reasons/[id]}` · `/api/classes`, `/api/classes/[classId]`, `/api/classes/[classId]/subjects/[subjectId]/grades`, `/api/students/[studentId]`, `/api/grades` (POST), `/api/grade-reasons`, `/api/timetable`, `/api/me/grades`, `/api/audit`, `/api/audit/verify`.
 
-## Tests (94, all passing – `npm test`)
+## Tests (109, all passing – `npm test`)
+- `tests/integration/rollover.test.ts`: 1xy→2xy mapping with the same cohort, promotion exactly once (concurrent runs), not before 1 September / only by admin, graduation + account deactivation, history preserved (grades, revisions, assignments, snapshots, audit), history access (commander yes, teacher no, new assignments do not change the past).
+- `tests/integration/timetable.test.ts`: template, row-level validation (class/day/slot/subject/teacher/inactive teacher/conflicts/formulas/odd-even), non-Excel files, missing columns, macros and zip bombs, dates outside the year, resolution per week, odd/even weeks, teacher isolation, versions (a new upload does not destroy, archive restores, republish), authorization (403 for non-admins, foreign Origin).
 Each integration file starts from a fresh copy of a template database (`tests/db.ts`), so the tests are independent of each other.
 - `tests/unit/results-engine.test.ts`: rounding, weighted mean with the exam, missing items, rules changed without code.
 - `tests/integration/gradebook.test.ts`: valid/invalid grade, other class/subject, modify/delete with mandatory reason + audit + revisions, optimistic versioning, another teacher's grade (403/404), edit window → correction, conduct only by the class diriginte, practical training only by the assigned teacher, exam only by the designated examiner, correction workflow (approve/reject/cancel/delete), commander and administrator cannot edit/approve directly, module plan, closing a module → snapshot + grading blocked, conflicting assignments, students cannot be moved.
@@ -99,8 +101,18 @@ Each integration file starts from a fresh copy of a template database (`tests/db
 ## Phase 2 – UI (Romanian, responsive, light/dark)
 Next.js App Router + Tailwind 4, self-hosted Inter font, navy/gold identity, nonce-based CSP per request (`src/proxy.ts`). Pages: `/autentificare`, `/schimbare-parola`, `/panou` (by role), `/catalog`, `/catalog/clase/[id]`, `/catalog/clase/[id]/materii/[subjectId]` (grades + entry), `/catalog/note/[id]` (details, history, modify/delete/correction request), `/catalog/elevi/[id]`, `/catalog/clase/[id]/rezultate/[moduleId]` (print-ready), `/catalog/notele-mele`, `/cereri-corectie`, `/elev`, `/administrare/{elevi,materii,module,repartizari}`. Navigation is generated on the server from capabilities; pages call the services (the same authorization as the API) and turn 403/404 into a 404 page.
 
+## Phase 3 – Academic years, promotion, history, timetable (implemented)
+**Academic years:** persistent (`2026–2027`, `2027–2028`, …), PLANNED → ACTIVE → CLOSED; every grade/enrollment/assignment/class belongs to a year. Closed years are read-only.
+**Automatic transition (`src/server/domain/rollover.ts`):**
+- On **1 September** (Europe/Bucharest time, independent of the server's timezone): 111→211, 112→212, 113→213, 114→214, 115→215, 124→224, 125→225 (new classes in the new year, **same cohort/promoție**); year I students → `PROMOTED` + active enrollment in 2xy; year II → `GRADUATED` (student `GRADUATED`, student account `INACTIVE` + sessions revoked); new, empty year I classes (suffixes from `school.classSuffixes`); still-open modules are closed with **result snapshots**; the old year's assignments are ended (not deleted); the old year → `CLOSED`, the new one → `ACTIVE`. Repeating students (`REPEATING` enrollment) stay in the same year of study.
+- **Server-side, not in the browser:** in-process scheduler (`src/instrumentation.ts` → `src/server/jobs/scheduler.ts`, hourly) in `AUTO` mode (default; `MANUAL_CONFIRM` configurable) + CLI `npm run an-nou` for an OS cron/systemd timer + manual execution from the administrator UI (only after 1 September).
+- **Idempotent:** advisory lock, refusal before the date, a unique `year_rollovers(from,to)` record, and no re-enrollment of students who already have an enrollment in the new year. Two concurrent runs → exactly one executes (tested).
+**History:** the commander selects any academic year in the catalog; the administrator views classes/students/modules for any year. Historical classes show their own roster (promoted/graduated), teachers and diriginte **from that year** (assignments are tied to the class of that year, so they never inherit later assignments). Teachers have no historical access (scope = active year only). Grades, revisions, snapshots and audit remain linked to the old year.
+**Timetable:** Excel template v1 (`docs/ORAR_IMPORT.md`, downloadable with reference sheets) → upload (multipart, Origin check, ≤ 2 MB, ZIP/zip-bomb/VBA-macro check before parsing, no formulas) → report with **row + column** for every error (unknown class/teacher/subject/day/time slot, inactive teacher, class/teacher conflicts with odd/even weeks and groups) and warnings (teacher without an assignment, room occupied) → draft version → **preview with diff** → publishing. **Versioning without loss:** for each week, the published version with the latest start date covering it; archiving restores the previous version; republishing is possible; the files are kept (SHA-256). Weekly view `/orar`: previous/current/next week + date picker, odd/even weeks; teacher = own lessons only (+ homeroom class), admin/commander = everything with class/teacher filters, student = own class.
+**UI:** `/orar`, `/administrare/orar`, `/administrare/orar/[id]`, `/administrare/ani-scolari` (transition preview, manual execution, history), `/administrare/clase` (by year), year selector in `/catalog` (commander) and `/administrare/elevi`.
+**Dependencies:** `exceljs` (with the `uuid` override to a patched version). Overrides for `deepmerge-ts`/`mysql2` (transitive dependencies of the Prisma CLI) → `npm audit`: 0 vulnerabilities.
+
 ## Pending work (roadmap)
-3. **Academic years and timetable:** automatic promotion (idempotent), history, Excel import, weekly timetable.
 4. **UI/UX, dashboards, reports** (Excel/PDF/print), audit pages.
 5. **Security audit** + SECURITY.md.
 
@@ -116,4 +128,5 @@ Next.js App Router + Tailwind 4, self-hosted Inter font, navy/gold identity, non
 2. Teacher edit window (default 7 days, configurable), integer vs. decimal grades (default integers).
 3. Official rank list and bell schedule (seed values are provisional).
 4. Hosting (on-premise vs. EU cloud), MApN requirements, 2FA before going online.
-5. `npm audit` reports 4 high-severity vulnerabilities in the Prisma CLI's dev dependencies (`mysql2`, `deepmerge-ts`). They are not used at runtime; to be re-evaluated when Prisma updates.
+5. The official bell schedule and the final timetable template format (v1 is documented and versioned; extra columns can be added without breaking).
+6. Repeating students: the model supports them (`REPEATING` enrollment), but there is no UI for marking them yet.

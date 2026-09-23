@@ -74,7 +74,8 @@ export async function getWeekTimetable(
       validFrom: { lte: sunday },
       OR: [{ validTo: null }, { validTo: { gte: monday } }],
     },
-    orderBy: { validFrom: "desc" },
+    // The newest start date wins; for equal start dates the latest publication wins.
+    orderBy: [{ validFrom: "desc" }, { publishedAt: "desc" }],
     select: { id: true, name: true, validFrom: true, validTo: true },
   });
 
@@ -121,4 +122,10 @@ export async function getWeekTimetable(
     entries,
     overrides,
   };
+}
+
+/** Active bell schedule (reference data, not sensitive). */
+export async function listTimeSlotsForGrid() {
+  const slots = await db.timeSlot.findMany({ where: { active: true }, orderBy: { index: "asc" } });
+  return slots.map((s) => ({ id: s.id, index: s.index, startTime: s.startTime, endTime: s.endTime }));
 }

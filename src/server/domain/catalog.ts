@@ -11,6 +11,7 @@ import {
 } from "@/server/authz/policy";
 import { loadScope } from "@/server/authz/scope";
 import type { Actor } from "@/server/authz/actor";
+import type { EnrollmentStatus } from "@/generated/prisma/enums";
 
 /**
  * Scoped academic reads. Every query is constrained by the actor's access
@@ -54,11 +55,15 @@ export type MyClass = {
   subjects: { id: string; name: string; kinds: string[] }[];
 };
 
-/** Classes visible to the actor: all (commander) or those with an active teaching/homeroom assignment. */
-export async function listMyClasses(actor: Actor): Promise<MyClass[]> {
+/**
+ * Classes visible to the actor: all classes of the selected year (commander; any
+ * year, including history) or those with an active teaching/homeroom assignment
+ * in the active year (teachers never get historical access through old assignments).
+ */
+export async function listMyClasses(actor: Actor, academicYearId?: string): Promise<MyClass[]> {
   if (hasPermission(actor, "academic.read.all")) {
     const classes = await db.classSection.findMany({
-      where: { academicYear: { status: "ACTIVE" } },
+      where: academicYearId ? { academicYearId } : { academicYear: { status: "ACTIVE" } },
       select: { id: true, code: true, yearOfStudy: true, company: { select: { name: true } } },
       orderBy: [{ yearOfStudy: "desc" }, { code: "asc" }],
     });
@@ -109,21 +114,25 @@ export async function getClassOverview(actor: Actor, classSectionId: string) {
       yearOfStudy: true,
       company: { select: { name: true } },
       academicYear: { select: { id: true, name: true, status: true } },
-      homeroomAssignments: { where: { endedAt: null }, select: { teacher: { select: personSelect } } },
+      homeroomAssignments: { orderBy: [{ endedAt: { sort: "desc", nulls: "first" } }, { validFrom: "desc" }], take: 1, select: { endedAt: true, teacher: { select: personSelect } } },
     },
   });
 
+  // Current year: active students; closed years: everyone who finished the year in this class.
+  const historical = cls.academicYear.status === "CLOSED";
+  const rosterWhere = historical ? { status: { in: ["PROMOTED", "GRADUATED", "REPEATING", "ACTIVE"] as EnrollmentStatus[] } } : { status: "ACTIVE" as const };
   const students = access.roster
     ? await db.enrollment.findMany({
-        where: { classSectionId, status: "ACTIVE" },
+        where: { classSectionId, ...rosterWhere },
         select: { student: { select: { id: true, firstName: true, lastName: true, registryNumber: true, rank: { select: { label: true } } } } },
         orderBy: [{ student: { lastName: "asc" } }, { student: { firstName: "asc" } }],
       })
     : [];
 
   // Subjects taught in the class (from assignments), plus "Purtare" – filtered by visibility.
+  // Assignments belong to this class-year only, so history never inherits later assignments.
   const taught = await db.teachingAssignment.findMany({
-    where: { classSectionId, endedAt: null },
+    where: { classSectionId, ...(historical ? {} : { endedAt: null }) },
     select: { subject: { select: { id: true, name: true, type: true } }, teacher: { select: personSelect } },
   });
   const conduct = await db.subject.findFirst({ where: { type: "CONDUCT", isSystem: true }, select: { id: true, name: true, type: true } });
@@ -163,7 +172,8 @@ export async function getClassOverview(actor: Actor, classSectionId: string) {
       yearOfStudy: cls.yearOfStudy,
       company: cls.company.name,
       academicYear: cls.academicYear,
-      homeroomTeacher: cls.homeroomAssignments[0]?.teacher ?? null,
+      homeroomTeacher: historical || !cls.homeroomAssignments[0]?.endedAt ? (cls.homeroomAssignments[0]?.teacher ?? null) : null,
+      historical,
     },
     isHomeroom: access.isHomeroom,
     canSeeResults: access.gradeSubjects === "ALL",
@@ -186,7 +196,7 @@ export async function getClassSubjectGrades(actor: Actor, classSectionId: string
   if (!subject) throw Errors.notFound();
   const [students, grades] = await Promise.all([
     db.enrollment.findMany({
-      where: { classSectionId, status: "ACTIVE" },
+      where: { classSectionId, status: { notIn: ["WITHDRAWN", "TRANSFERRED"] } },
       select: { student: { select: { id: true, firstName: true, lastName: true } } },
       orderBy: [{ student: { lastName: "asc" } }, { student: { firstName: "asc" } }],
     }),

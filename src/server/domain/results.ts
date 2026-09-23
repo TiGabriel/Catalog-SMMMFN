@@ -112,7 +112,8 @@ export async function getModuleResults(actor: Actor, classSectionId: string, mod
 }
 
 /** Freezes the results of every class of a module (called in the module-closing transaction). */
-export async function snapshotModule(tx: DbOrTx, moduleId: string, actorId: string): Promise<number> {
+/** `actorId` is null when the automatic year transition closes the module. */
+export async function snapshotModule(tx: DbOrTx, moduleId: string, actorId: string | null): Promise<number> {
   const mod = await tx.module.findUniqueOrThrow({ where: { id: moduleId } });
   const classes = await tx.classSection.findMany({
     where: { academicYearId: mod.academicYearId, yearOfStudy: mod.yearOfStudy },

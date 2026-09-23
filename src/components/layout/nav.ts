@@ -9,7 +9,7 @@ export function buildNav(caps: Capabilities): NavGroup[] {
   if (caps.claseleMele || caps.catalogGeneral) main.push({ href: "/catalog", label: caps.catalogGeneral ? "Catalog" : "Clasele mele", icon: "book" });
   if (caps.introducereNote) main.push({ href: "/catalog/notele-mele", label: "Notele introduse", icon: "list" });
   if (caps.noteleMele) main.push({ href: "/elev", label: "Situația mea", icon: "user" });
-  // Orar (phase 3)
+  if (caps.orar) main.push({ href: "/orar", label: "Orar", icon: "calendar" });
   if (caps.cereriCorectie) main.push({ href: "/cereri-corectie", label: "Cereri de corecție", icon: "inbox" });
   // Rapoarte and Jurnal de audit (phase 4)
 
@@ -18,10 +18,13 @@ export function buildNav(caps: Capabilities): NavGroup[] {
     groups.push({
       title: "Administrare",
       items: [
+        { href: "/administrare/ani-scolari", label: "Ani școlari", icon: "archive" },
+        { href: "/administrare/clase", label: "Clase", icon: "layers" },
         { href: "/administrare/elevi", label: "Elevi", icon: "graduation" },
         { href: "/administrare/materii", label: "Materii", icon: "book" },
         { href: "/administrare/module", label: "Module", icon: "grid" },
         { href: "/administrare/repartizari", label: "Repartizări", icon: "link" },
+        { href: "/administrare/orar", label: "Orar (import)", icon: "upload" },
       ],
     });
   }

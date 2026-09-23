@@ -87,3 +87,10 @@ export const ENROLLMENT_STATUS_LABEL: Record<string, string> = {
   TRANSFERRED: "Transferat",
   WITHDRAWN: "Retras",
 };
+
+/** "1 elev", "2 elevi", "20 de elevi" (Romanian plural rules). */
+export function plural(n: number, one: string, many: string): string {
+  if (n === 1) return `1 ${one}`;
+  const mod = n % 100;
+  return n === 0 || (mod >= 1 && mod <= 19) ? `${n} ${many}` : `${n} de ${many}`;
+}
