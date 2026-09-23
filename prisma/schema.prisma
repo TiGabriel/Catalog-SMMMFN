@@ -1,0 +1,805 @@
+// Catalog electronic SMMMFN – database schema.
+//
+// Historical-data rules (see docs/ARCHITECTURE.md §3):
+// - Every relation that points at historical data uses `onDelete: Restrict`,
+//   so deleting a user/class/subject can never cascade into grades or audit.
+// - Users, grades, revisions, enrollments, assignments and the audit log are
+//   additionally protected by triggers that reject DELETE (see migrations).
+// - "Deleting" a user means status = DELETED (login removed); the row stays.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────────── Identity ─────────────────────────────
+
+enum Role {
+  ADMINISTRATOR
+  COMANDANT_UNITATE
+  PROFESOR
+  ELEV
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  DELETED
+}
+
+model Rank {
+  id        String   @id @default(uuid()) @db.Uuid
+  code      String   @unique
+  label     String
+  category  String
+  sortOrder Int      @default(0) @map("sort_order")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  users    User[]
+  students Student[]
+
+  @@map("ranks")
+}
+
+model User {
+  id                 String     @id @default(uuid()) @db.Uuid
+  firstName          String     @map("first_name")
+  lastName           String     @map("last_name")
+  rankId             String?    @map("rank_id") @db.Uuid
+  /// Always stored lower-case (normalized by the application).
+  username           String     @unique
+  /// argon2id hash; NULL once the account is DELETED.
+  passwordHash       String?    @map("password_hash")
+  role               Role
+  status             UserStatus @default(ACTIVE)
+  mustChangePassword Boolean    @default(true) @map("must_change_password")
+  passwordChangedAt  DateTime?  @map("password_changed_at") @db.Timestamptz(3)
+  lastLoginAt        DateTime?  @map("last_login_at") @db.Timestamptz(3)
+  deactivatedAt      DateTime?  @map("deactivated_at") @db.Timestamptz(3)
+  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  rank Rank? @relation(fields: [rankId], references: [id], onDelete: Restrict)
+
+  sessions                Session[]
+  student                 Student?
+  teachingAssignments     TeachingAssignment[]     @relation("AssignmentTeacher")
+  assignmentsCreated      TeachingAssignment[]     @relation("AssignmentCreatedBy")
+  assignmentsEnded        TeachingAssignment[]     @relation("AssignmentEndedBy")
+  homeroomAssignments     HomeroomAssignment[]     @relation("HomeroomTeacher")
+  homeroomCreated         HomeroomAssignment[]     @relation("HomeroomCreatedBy")
+  homeroomEnded           HomeroomAssignment[]     @relation("HomeroomEndedBy")
+  gradesAuthored          Grade[]                  @relation("GradeAuthor")
+  gradesDeleted           Grade[]                  @relation("GradeDeletedBy")
+  gradeRevisions          GradeRevision[]
+  correctionRequests      GradeCorrectionRequest[] @relation("CorrectionRequestedBy")
+  correctionReviews       GradeCorrectionRequest[] @relation("CorrectionReviewedBy")
+  timetableEntries        TimetableEntry[]
+  timetableOverrides      TimetableOverride[]      @relation("OverrideTeacher")
+  timetableOverridesMade  TimetableOverride[]      @relation("OverrideCreatedBy")
+  timetableImports        TimetableImport[]
+  timetableVersionsMade   TimetableVersion[]       @relation("TimetableCreatedBy")
+  timetableVersionsPubl   TimetableVersion[]       @relation("TimetablePublishedBy")
+  auditEntries            AuditLog[]
+  settingsUpdated         SystemSetting[]
+  rolloversExecuted       YearRollover[]
+
+  @@index([role, status])
+  @@map("users")
+}
+
+model Session {
+  /// SHA-256 (hex) of the random session token; the raw token only lives in the cookie.
+  id           String    @id
+  userId       String    @map("user_id") @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastSeenAt   DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz(3)
+  ip           String?
+  userAgent    String?   @map("user_agent")
+  revokedAt    DateTime? @map("revoked_at") @db.Timestamptz(3)
+  revokeReason String?   @map("revoke_reason")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model LoginAttempt {
+  id       BigInt   @id @default(autoincrement())
+  username String
+  ip       String?
+  success  Boolean
+  at       DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([username, at])
+  @@index([ip, at])
+  @@map("login_attempts")
+}
+
+// ───────────────────────── Academic structure ─────────────────────────
+
+enum AcademicYearStatus {
+  PLANNED
+  ACTIVE
+  CLOSED
+}
+
+model AcademicYear {
+  id        String             @id @default(uuid()) @db.Uuid
+  /// e.g. "2026–2027"
+  name      String             @unique
+  startDate DateTime           @map("start_date") @db.Date
+  endDate   DateTime           @map("end_date") @db.Date
+  status    AcademicYearStatus @default(PLANNED)
+  createdAt DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  classSections       ClassSection[]
+  enrollments         Enrollment[]
+  modules             Module[]
+  teachingAssignments TeachingAssignment[]
+  homeroomAssignments HomeroomAssignment[]
+  grades              Grade[]
+  timetableVersions   TimetableVersion[]
+  rolloversFrom       YearRollover[]       @relation("RolloverFrom")
+  rolloversTo         YearRollover[]       @relation("RolloverTo")
+
+  @@map("academic_years")
+}
+
+/// Compania 1 = anul II, Compania 2 = anul I (configurable mapping).
+model Company {
+  id          String   @id @default(uuid()) @db.Uuid
+  number      Int      @unique
+  name        String   @unique
+  yearOfStudy Int      @unique @map("year_of_study")
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  classSections ClassSection[]
+
+  @@map("companies")
+}
+
+model Specialization {
+  id        String   @id @default(uuid()) @db.Uuid
+  code      String   @unique
+  name      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  cohorts        Cohort[]
+  classSections  ClassSection[]
+  moduleSubjects ModuleSubject[]
+
+  @@map("specializations")
+}
+
+/// Promoție: the same group of students across both years of study
+/// (class 112 in one year and 212 in the next share one cohort).
+model Cohort {
+  id               String   @id @default(uuid()) @db.Uuid
+  /// Calendar year in which the cohort entered year I (e.g. 2026 for 2026–2027).
+  startYear        Int      @map("start_year")
+  /// Class suffix, e.g. "12" → 112 / 212.
+  suffix           String
+  specializationId String?  @map("specialization_id") @db.Uuid
+  name             String
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  specialization Specialization? @relation(fields: [specializationId], references: [id], onDelete: Restrict)
+  classSections  ClassSection[]
+
+  @@unique([startYear, suffix])
+  @@map("cohorts")
+}
+
+/// A class within one academic year. Never reused across years.
+model ClassSection {
+  id               String   @id @default(uuid()) @db.Uuid
+  academicYearId   String   @map("academic_year_id") @db.Uuid
+  cohortId         String   @map("cohort_id") @db.Uuid
+  companyId        String   @map("company_id") @db.Uuid
+  specializationId String?  @map("specialization_id") @db.Uuid
+  yearOfStudy      Int      @map("year_of_study")
+  /// yearOfStudy + cohort suffix, e.g. "112"
+  code             String
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  academicYear   AcademicYear    @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  cohort         Cohort          @relation(fields: [cohortId], references: [id], onDelete: Restrict)
+  company        Company         @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  specialization Specialization? @relation(fields: [specializationId], references: [id], onDelete: Restrict)
+
+  enrollments         Enrollment[]
+  teachingAssignments TeachingAssignment[]
+  homeroomAssignments HomeroomAssignment[]
+  grades              Grade[]
+  correctionRequests  GradeCorrectionRequest[]
+  timetableEntries    TimetableEntry[]
+  timetableOverrides  TimetableOverride[]
+
+  @@unique([academicYearId, code])
+  @@index([cohortId])
+  @@map("class_sections")
+}
+
+enum StudentStatus {
+  ACTIVE
+  GRADUATED
+  WITHDRAWN
+  SUSPENDED
+}
+
+/// Academic identity of a student. The optional login account (User) is separate
+/// so it can be removed after graduation while this record and all grades remain.
+model Student {
+  id             String        @id @default(uuid()) @db.Uuid
+  firstName      String        @map("first_name")
+  lastName       String        @map("last_name")
+  rankId         String?       @map("rank_id") @db.Uuid
+  /// Număr matricol
+  registryNumber String?       @unique @map("registry_number")
+  status         StudentStatus @default(ACTIVE)
+  userId         String?       @unique @map("user_id") @db.Uuid
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  rank Rank? @relation(fields: [rankId], references: [id], onDelete: Restrict)
+  user User? @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  enrollments        Enrollment[]
+  grades             Grade[]
+  correctionRequests GradeCorrectionRequest[]
+
+  @@index([lastName, firstName])
+  @@map("students")
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  PROMOTED
+  GRADUATED
+  REPEATING
+  TRANSFERRED
+  WITHDRAWN
+}
+
+model Enrollment {
+  id             String           @id @default(uuid()) @db.Uuid
+  studentId      String           @map("student_id") @db.Uuid
+  classSectionId String           @map("class_section_id") @db.Uuid
+  academicYearId String           @map("academic_year_id") @db.Uuid
+  status         EnrollmentStatus @default(ACTIVE)
+  startDate      DateTime         @map("start_date") @db.Date
+  endDate        DateTime?        @map("end_date") @db.Date
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  student      Student      @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  classSection ClassSection @relation(fields: [classSectionId], references: [id], onDelete: Restrict)
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+
+  grades Grade[]
+
+  @@index([classSectionId, status])
+  @@index([studentId])
+  @@map("enrollments")
+}
+
+/// Record of each September-1 promotion run (anul I → anul II, anul II → absolvenți).
+model YearRollover {
+  id             String   @id @default(uuid()) @db.Uuid
+  fromYearId     String   @map("from_year_id") @db.Uuid
+  toYearId       String   @map("to_year_id") @db.Uuid
+  executedById   String?  @map("executed_by_id") @db.Uuid
+  executedAt     DateTime @default(now()) @map("executed_at") @db.Timestamptz(3)
+  summary        Json
+
+  fromYear   AcademicYear @relation("RolloverFrom", fields: [fromYearId], references: [id], onDelete: Restrict)
+  toYear     AcademicYear @relation("RolloverTo", fields: [toYearId], references: [id], onDelete: Restrict)
+  executedBy User?        @relation(fields: [executedById], references: [id], onDelete: Restrict)
+
+  @@unique([fromYearId, toYearId])
+  @@map("year_rollovers")
+}
+
+// ───────────────────────────── Curriculum ─────────────────────────────
+
+enum SubjectType {
+  GENERAL
+  SPECIALIZATION
+  PRACTICAL_TRAINING
+  CONDUCT
+}
+
+model Subject {
+  id        String      @id @default(uuid()) @db.Uuid
+  code      String      @unique
+  name      String
+  shortName String?     @map("short_name")
+  type      SubjectType
+  /// System subjects (e.g. "Purtare") cannot be deactivated or retyped.
+  isSystem  Boolean     @default(false) @map("is_system")
+  active    Boolean     @default(true)
+  createdAt DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  moduleSubjects      ModuleSubject[]
+  teachingAssignments TeachingAssignment[]
+  grades              Grade[]
+  correctionRequests  GradeCorrectionRequest[]
+  timetableEntries    TimetableEntry[]
+  timetableOverrides  TimetableOverride[]
+
+  @@map("subjects")
+}
+
+enum ModuleStatus {
+  PLANNED
+  OPEN
+  CLOSED
+}
+
+model Module {
+  id             String       @id @default(uuid()) @db.Uuid
+  academicYearId String       @map("academic_year_id") @db.Uuid
+  yearOfStudy    Int          @map("year_of_study")
+  name           String
+  order          Int
+  startDate      DateTime?    @map("start_date") @db.Date
+  endDate        DateTime?    @map("end_date") @db.Date
+  status         ModuleStatus @default(PLANNED)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+
+  subjects            ModuleSubject[]
+  teachingAssignments TeachingAssignment[]
+  grades              Grade[]
+  correctionRequests  GradeCorrectionRequest[]
+
+  @@unique([academicYearId, yearOfStudy, order])
+  @@map("modules")
+}
+
+/// Which subjects are graded in a module (the module's curriculum plan).
+model ModuleSubject {
+  id               String   @id @default(uuid()) @db.Uuid
+  moduleId         String   @map("module_id") @db.Uuid
+  subjectId        String   @map("subject_id") @db.Uuid
+  specializationId String?  @map("specialization_id") @db.Uuid
+  hasFinalExam     Boolean  @default(false) @map("has_final_exam")
+  /// Weight/credits used by the (future, configurable) averaging engine.
+  weight           Decimal? @db.Decimal(6, 2)
+  hoursPerWeek     Int?     @map("hours_per_week")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  module         Module          @relation(fields: [moduleId], references: [id], onDelete: Restrict)
+  subject        Subject         @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  specialization Specialization? @relation(fields: [specializationId], references: [id], onDelete: Restrict)
+
+  @@unique([moduleId, subjectId, specializationId])
+  @@map("module_subjects")
+}
+
+// ───────────────────────────── Assignments ─────────────────────────────
+
+enum AssignmentKind {
+  /// Regular teaching: current grades for a subject in a class.
+  SUBJECT_TEACHING
+  /// Instruire practică: grades for a PRACTICAL_TRAINING subject.
+  PRACTICAL_TRAINING
+  /// Examinator for the final module exam (requires moduleId).
+  MODULE_EXAM
+}
+
+/// Grants a PROFESOR access to one (class, subject) pair. Never deleted – ended via endedAt/validTo.
+model TeachingAssignment {
+  id             String         @id @default(uuid()) @db.Uuid
+  teacherId      String         @map("teacher_id") @db.Uuid
+  classSectionId String         @map("class_section_id") @db.Uuid
+  subjectId      String         @map("subject_id") @db.Uuid
+  academicYearId String         @map("academic_year_id") @db.Uuid
+  moduleId       String?        @map("module_id") @db.Uuid
+  kind           AssignmentKind @default(SUBJECT_TEACHING)
+  validFrom      DateTime       @map("valid_from") @db.Date
+  validTo        DateTime?      @map("valid_to") @db.Date
+  endedAt        DateTime?      @map("ended_at") @db.Timestamptz(3)
+  endedById      String?        @map("ended_by_id") @db.Uuid
+  endReason      String?        @map("end_reason")
+  createdById    String?        @map("created_by_id") @db.Uuid
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  teacher      User         @relation("AssignmentTeacher", fields: [teacherId], references: [id], onDelete: Restrict)
+  classSection ClassSection @relation(fields: [classSectionId], references: [id], onDelete: Restrict)
+  subject      Subject      @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  module       Module?      @relation(fields: [moduleId], references: [id], onDelete: Restrict)
+  createdBy    User?        @relation("AssignmentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  endedBy      User?        @relation("AssignmentEndedBy", fields: [endedById], references: [id], onDelete: Restrict)
+
+  grades Grade[]
+
+  @@index([teacherId, academicYearId])
+  @@index([classSectionId, subjectId])
+  @@map("teaching_assignments")
+}
+
+/// Diriginte: grants a PROFESOR read access to the whole class and the conduct grade.
+model HomeroomAssignment {
+  id             String    @id @default(uuid()) @db.Uuid
+  teacherId      String    @map("teacher_id") @db.Uuid
+  classSectionId String    @map("class_section_id") @db.Uuid
+  academicYearId String    @map("academic_year_id") @db.Uuid
+  validFrom      DateTime  @map("valid_from") @db.Date
+  validTo        DateTime? @map("valid_to") @db.Date
+  endedAt        DateTime? @map("ended_at") @db.Timestamptz(3)
+  endedById      String?   @map("ended_by_id") @db.Uuid
+  endReason      String?   @map("end_reason")
+  createdById    String?   @map("created_by_id") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  teacher      User         @relation("HomeroomTeacher", fields: [teacherId], references: [id], onDelete: Restrict)
+  classSection ClassSection @relation(fields: [classSectionId], references: [id], onDelete: Restrict)
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  createdBy    User?        @relation("HomeroomCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  endedBy      User?        @relation("HomeroomEndedBy", fields: [endedById], references: [id], onDelete: Restrict)
+
+  @@index([teacherId, academicYearId])
+  @@index([classSectionId])
+  @@map("homeroom_assignments")
+}
+
+// ───────────────────────────── Grades ─────────────────────────────
+
+enum GradeKind {
+  /// Notă curentă
+  CURRENT
+  /// Examen final de modul
+  MODULE_EXAM
+  /// Notă finală atribuită direct (ex. purtare), dacă regulile o cer
+  FINAL
+}
+
+enum GradeStatus {
+  ACTIVE
+  DELETED
+}
+
+enum GradeRevisionAction {
+  CREATE
+  UPDATE
+  DELETE
+  RESTORE
+}
+
+/// Configurable grade type/reason (Testare, Ascultare, …).
+model GradeReason {
+  id        String      @id @default(uuid()) @db.Uuid
+  code      String      @unique
+  label     String
+  appliesTo GradeKind[] @map("applies_to")
+  sortOrder Int         @default(0) @map("sort_order")
+  active    Boolean     @default(true)
+  createdAt DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  grades             Grade[]
+  revisions          GradeRevision[]
+  correctionRequests GradeCorrectionRequest[]
+
+  @@map("grade_reasons")
+}
+
+model Grade {
+  id                   String      @id @default(uuid()) @db.Uuid
+  studentId            String      @map("student_id") @db.Uuid
+  enrollmentId         String      @map("enrollment_id") @db.Uuid
+  /// Class at the time of grading (history is preserved after promotion).
+  classSectionId       String      @map("class_section_id") @db.Uuid
+  subjectId            String      @map("subject_id") @db.Uuid
+  moduleId             String?     @map("module_id") @db.Uuid
+  academicYearId       String      @map("academic_year_id") @db.Uuid
+  kind                 GradeKind   @default(CURRENT)
+  /// 1–10, enforced by a CHECK constraint.
+  value                Decimal     @db.Decimal(4, 2)
+  reasonId             String?     @map("reason_id") @db.Uuid
+  note                 String?
+  gradeDate            DateTime    @map("grade_date") @db.Date
+  /// Original author – never changes, even if the account is later deactivated.
+  authorId             String      @map("author_id") @db.Uuid
+  teachingAssignmentId String?     @map("teaching_assignment_id") @db.Uuid
+  status               GradeStatus @default(ACTIVE)
+  version              Int         @default(1)
+  deletedAt            DateTime?   @map("deleted_at") @db.Timestamptz(3)
+  deletedById          String?     @map("deleted_by_id") @db.Uuid
+  deletionReason       String?     @map("deletion_reason")
+  createdAt            DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  student            Student             @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  enrollment         Enrollment          @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
+  classSection       ClassSection        @relation(fields: [classSectionId], references: [id], onDelete: Restrict)
+  subject            Subject             @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  module             Module?             @relation(fields: [moduleId], references: [id], onDelete: Restrict)
+  academicYear       AcademicYear        @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  reason             GradeReason?        @relation(fields: [reasonId], references: [id], onDelete: Restrict)
+  author             User                @relation("GradeAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  deletedBy          User?               @relation("GradeDeletedBy", fields: [deletedById], references: [id], onDelete: Restrict)
+  teachingAssignment TeachingAssignment? @relation(fields: [teachingAssignmentId], references: [id], onDelete: Restrict)
+
+  revisions          GradeRevision[]
+  correctionRequests GradeCorrectionRequest[]
+
+  @@index([classSectionId, subjectId, status])
+  @@index([studentId, academicYearId])
+  @@index([authorId])
+  @@map("grades")
+}
+
+/// Immutable history of every state of a grade (UPDATE/DELETE blocked by trigger).
+model GradeRevision {
+  id                  BigInt              @id @default(autoincrement())
+  gradeId             String              @map("grade_id") @db.Uuid
+  revisionNo          Int                 @map("revision_no")
+  action              GradeRevisionAction
+  value               Decimal             @db.Decimal(4, 2)
+  reasonId            String?             @map("reason_id") @db.Uuid
+  gradeDate           DateTime            @map("grade_date") @db.Date
+  note                String?
+  status              GradeStatus
+  changedById         String              @map("changed_by_id") @db.Uuid
+  changeReason        String?             @map("change_reason")
+  correctionRequestId String?             @map("correction_request_id") @db.Uuid
+  changedAt           DateTime            @default(now()) @map("changed_at") @db.Timestamptz(3)
+
+  grade             Grade                   @relation(fields: [gradeId], references: [id], onDelete: Restrict)
+  reason            GradeReason?            @relation(fields: [reasonId], references: [id], onDelete: Restrict)
+  changedBy         User                    @relation(fields: [changedById], references: [id], onDelete: Restrict)
+  correctionRequest GradeCorrectionRequest? @relation(fields: [correctionRequestId], references: [id], onDelete: Restrict)
+
+  @@unique([gradeId, revisionNo])
+  @@map("grade_revisions")
+}
+
+enum CorrectionRequestType {
+  MODIFY
+  DELETE
+  ADD_LATE
+}
+
+enum CorrectionRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+/// Special correction/deletion request, reviewed by COMANDANT UNITATE (workflow: phase 4).
+model GradeCorrectionRequest {
+  id               String                  @id @default(uuid()) @db.Uuid
+  type             CorrectionRequestType
+  gradeId          String?                 @map("grade_id") @db.Uuid
+  studentId        String                  @map("student_id") @db.Uuid
+  classSectionId   String                  @map("class_section_id") @db.Uuid
+  subjectId        String                  @map("subject_id") @db.Uuid
+  moduleId         String?                 @map("module_id") @db.Uuid
+  proposedValue    Decimal?                @map("proposed_value") @db.Decimal(4, 2)
+  proposedReasonId String?                 @map("proposed_reason_id") @db.Uuid
+  justification    String
+  status           CorrectionRequestStatus @default(PENDING)
+  requestedById    String                  @map("requested_by_id") @db.Uuid
+  reviewedById     String?                 @map("reviewed_by_id") @db.Uuid
+  reviewedAt       DateTime?               @map("reviewed_at") @db.Timestamptz(3)
+  reviewComment    String?                 @map("review_comment")
+  appliedAt        DateTime?               @map("applied_at") @db.Timestamptz(3)
+  createdAt        DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime                @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  grade          Grade?       @relation(fields: [gradeId], references: [id], onDelete: Restrict)
+  student        Student      @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  classSection   ClassSection @relation(fields: [classSectionId], references: [id], onDelete: Restrict)
+  subject        Subject      @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  module         Module?      @relation(fields: [moduleId], references: [id], onDelete: Restrict)
+  proposedReason GradeReason? @relation(fields: [proposedReasonId], references: [id], onDelete: Restrict)
+  requestedBy    User         @relation("CorrectionRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  reviewedBy     User?        @relation("CorrectionReviewedBy", fields: [reviewedById], references: [id], onDelete: Restrict)
+
+  revisions GradeRevision[]
+
+  @@index([status])
+  @@map("grade_correction_requests")
+}
+
+// ───────────────────────────── Timetable ─────────────────────────────
+
+enum TimetableStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum WeekParity {
+  ALL
+  ODD
+  EVEN
+}
+
+enum TimetableImportStatus {
+  UPLOADED
+  VALIDATED
+  FAILED
+  PUBLISHED
+}
+
+/// Bell schedule (ora 1 = 08:00–08:50, …). Configurable.
+model TimeSlot {
+  id        String   @id @default(uuid()) @db.Uuid
+  index     Int      @unique
+  startTime String   @map("start_time")
+  endTime   String   @map("end_time")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  entries   TimetableEntry[]
+  overrides TimetableOverride[]
+
+  @@map("time_slots")
+}
+
+model TimetableVersion {
+  id             String          @id @default(uuid()) @db.Uuid
+  academicYearId String          @map("academic_year_id") @db.Uuid
+  name           String
+  validFrom      DateTime        @map("valid_from") @db.Date
+  validTo        DateTime?       @map("valid_to") @db.Date
+  status         TimetableStatus @default(DRAFT)
+  importId       String?         @unique @map("import_id") @db.Uuid
+  createdById    String?         @map("created_by_id") @db.Uuid
+  publishedById  String?         @map("published_by_id") @db.Uuid
+  publishedAt    DateTime?       @map("published_at") @db.Timestamptz(3)
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  academicYear AcademicYear     @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  import       TimetableImport? @relation(fields: [importId], references: [id], onDelete: Restrict)
+  createdBy    User?            @relation("TimetableCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  publishedBy  User?            @relation("TimetablePublishedBy", fields: [publishedById], references: [id], onDelete: Restrict)
+
+  entries TimetableEntry[]
+
+  @@index([academicYearId, status])
+  @@map("timetable_versions")
+}
+
+model TimetableEntry {
+  id             String     @id @default(uuid()) @db.Uuid
+  versionId      String     @map("version_id") @db.Uuid
+  classSectionId String     @map("class_section_id") @db.Uuid
+  /// ISO day of week: 1 = luni … 7 = duminică
+  dayOfWeek      Int        @map("day_of_week")
+  timeSlotId     String     @map("time_slot_id") @db.Uuid
+  subjectId      String     @map("subject_id") @db.Uuid
+  teacherId      String?    @map("teacher_id") @db.Uuid
+  room           String?
+  groupLabel     String?    @map("group_label")
+  weekParity     WeekParity @default(ALL) @map("week_parity")
+
+  version      TimetableVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  classSection ClassSection     @relation(fields: [classSectionId], references: [id], onDelete: Restrict)
+  timeSlot     TimeSlot         @relation(fields: [timeSlotId], references: [id], onDelete: Restrict)
+  subject      Subject          @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  teacher      User?            @relation(fields: [teacherId], references: [id], onDelete: Restrict)
+
+  @@index([versionId, classSectionId])
+  @@index([versionId, teacherId])
+  @@map("timetable_entries")
+}
+
+/// One-off change for a specific date (replacement teacher, cancelled lesson, …).
+model TimetableOverride {
+  id             String   @id @default(uuid()) @db.Uuid
+  date           DateTime @db.Date
+  classSectionId String   @map("class_section_id") @db.Uuid
+  timeSlotId     String   @map("time_slot_id") @db.Uuid
+  subjectId      String?  @map("subject_id") @db.Uuid
+  teacherId      String?  @map("teacher_id") @db.Uuid
+  room           String?
+  cancelled      Boolean  @default(false)
+  note           String?
+  createdById    String?  @map("created_by_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  classSection ClassSection @relation(fields: [classSectionId], references: [id], onDelete: Restrict)
+  timeSlot     TimeSlot     @relation(fields: [timeSlotId], references: [id], onDelete: Restrict)
+  subject      Subject?     @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  teacher      User?        @relation("OverrideTeacher", fields: [teacherId], references: [id], onDelete: Restrict)
+  createdBy    User?        @relation("OverrideCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([date, classSectionId])
+  @@map("timetable_overrides")
+}
+
+model TimetableImport {
+  id              String                @id @default(uuid()) @db.Uuid
+  fileName        String                @map("file_name")
+  fileHash        String                @map("file_hash")
+  fileSize        Int                   @map("file_size")
+  templateVersion String                @map("template_version")
+  status          TimetableImportStatus @default(UPLOADED)
+  report          Json?
+  content         Bytes?
+  uploadedById    String                @map("uploaded_by_id") @db.Uuid
+  uploadedAt      DateTime              @default(now()) @map("uploaded_at") @db.Timestamptz(3)
+
+  uploadedBy User              @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
+  version    TimetableVersion?
+
+  @@map("timetable_imports")
+}
+
+// ───────────────────────────── System ─────────────────────────────
+
+enum AuditOutcome {
+  SUCCESS
+  FAILURE
+  DENIED
+}
+
+/// Append-only audit trail. UPDATE/DELETE/TRUNCATE are rejected by triggers,
+/// `hash`/`prev_hash`/`occurred_at` are set by a BEFORE INSERT trigger (hash chain).
+model AuditLog {
+  id             BigInt       @id @default(autoincrement())
+  occurredAt     DateTime     @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  actorId        String?      @map("actor_id") @db.Uuid
+  /// Name/rank/role of the actor at the time of the action.
+  actorSnapshot  Json?        @map("actor_snapshot")
+  action         String
+  outcome        AuditOutcome @default(SUCCESS)
+  entityType     String?      @map("entity_type")
+  entityId       String?      @map("entity_id")
+  studentId      String?      @map("student_id") @db.Uuid
+  classSectionId String?      @map("class_section_id") @db.Uuid
+  subjectId      String?      @map("subject_id") @db.Uuid
+  academicYearId String?      @map("academic_year_id") @db.Uuid
+  before         Json?
+  after          Json?
+  reason         String?
+  metadata       Json?
+  ip             String?
+  userAgent      String?      @map("user_agent")
+  sessionRef     String?      @map("session_ref")
+  requestId      String?      @map("request_id")
+  prevHash       String?      @map("prev_hash")
+  hash           String       @default("")
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([occurredAt])
+  @@index([actorId, occurredAt])
+  @@index([action, occurredAt])
+  @@index([entityType, entityId])
+  @@map("audit_log")
+}
+
+model SystemSetting {
+  key         String   @id
+  value       Json
+  description String?
+  updatedById String?  @map("updated_by_id") @db.Uuid
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  updatedBy User? @relation(fields: [updatedById], references: [id], onDelete: Restrict)
+
+  @@map("system_settings")
+}
