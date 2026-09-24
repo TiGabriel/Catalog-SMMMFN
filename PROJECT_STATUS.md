@@ -47,7 +47,31 @@ Related documents: [`README.md`](README.md) (development) · [`DEPLOYMENT.md`](D
 - Least privilege: the `catalog_app` role has no DELETE on history and no UPDATE/DELETE on the audit log (`scripts/db-grants.ts`).
 - Backup: daily `pg_dump` (custom format, checksum, optional GPG, retention) + restore into an empty database with verification (tested).
 
-## 5. Tests performed
+## 6. Security audit (phase 5) – summary
+Full report: [`SECURITY.md`](SECURITY.md) §8 (audit results) and §8b (production review). All 30 requested areas and all role, audit and history checks were verified and are covered by automated tests (`tests/integration/security.test.ts` + `auth`, `authorization`, `gradebook`, `db-integrity`, `rollover`, `reports-audit`).
+
+**Vulnerabilities found → fixes**
+| # | Finding | Fix |
+|---|---|---|
+| 1 | Brute force: parallel requests bypassed the 5-failure limit | check → verify → record serialized per username (advisory lock) |
+| 2 | Session fixation: presented session not revoked at login, token not rotated on password change | revoked at login, rotated on password change |
+| 3 | Student sessions survived disabling student accounts | checked on every request |
+| 4 | JSON body limit bypassable with chunked requests | 64 KB streaming limit |
+| 5 | Zip bomb: declared sizes in .xlsx were trusted | bounded real decompression of every part |
+| 6 | No rate limit when the client IP is unknown | per-session limit (240/min) |
+| 7 | Prisma errors (with arguments, e.g. a password hash) could reach the logs | sanitized logging |
+| 8 | A password typed into the username field was stored in the audit/attempts | redaction + hashing |
+| 9 | Administrator could stage a teacher account/assignment without academic oversight | visible in the commander's audit (assignments, teacher password resets, grade settings, rule sets, year status) |
+| 10 | No protection against guessable passwords | blocklist of common words (incl. leetspeak) |
+| 11 | Race: duplicate conduct/exam grades | lock + re-check in the transaction |
+| 12 | Admin CLI showed the password on screen | hidden input |
+| 13 | (phase 6) `.env.test` tracked in Git, demo password in code | untracked + template; password only from the environment |
+
+**No vulnerabilities found (verified, with tests):** SQL injection, XSS (nonce CSP, no `dangerouslySetInnerHTML`), CSRF (Origin + JSON + SameSite=Strict), IDOR (404 + audit), privilege escalation, frontend-only authorization, audit tampering (trigger + grants + hash chain), deletion of history, access to previous years, teacher/diriginte/student isolation, grade editing by the commander/administrator, error leakage.
+
+**Remaining risks:** administrator trust (they control identities – mitigated through commander oversight; 2FA recommended), temporary lockout of a known username (DoS), CSP `style-src 'unsafe-inline'`, in-memory limiter per instance, audit retention to be decided, early test credentials remaining in Git history (local values only).
+
+## 5a. Tests performed
 | Type | Scope | Result |
 |---|---|---|
 | Unit (`tests/unit`) | password policy, permission matrix, results engine | pass |
