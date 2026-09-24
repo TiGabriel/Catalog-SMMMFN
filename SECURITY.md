@@ -3,7 +3,7 @@
 Security design, audit results and operating assumptions for the electronic gradebook of
 **Școala Militară de Maiștri Militari a Forțelor Navale „Amiral Ion Murgescu”**.
 
-_Last review: 2026-09-24 (phase 5 – dedicated security audit). Test suite: 134 automated tests, including `tests/integration/security.test.ts`._
+_Last review: 2026-09-24 (phase 5 security audit + phase 6 production-readiness review). 134 automated tests (incl. `tests/integration/security.test.ts`) + 67 end-to-end browser checks._
 
 ---
 
@@ -115,9 +115,22 @@ Key guarantees (all tested):
 | 12 | Credential exposure (CLI) | `creeaza-admin` echoed the password | **Fixed:** hidden input. |
 | – | SQLi, XSS, CSRF, IDOR, privilege escalation, frontend-only authz, audit tampering, deletion of history, student isolation, commander/admin grade editing, error leakage, config handling | Reviewed. No vulnerability found, and existing controls are covered by tests (`auth`, `authorization`, `gradebook`, `db-integrity`, `rollover`, `timetable`, `reports-audit`, `security`). | OK |
 
+## 8b. Production-readiness review (phase 6)
+
+| Area | Finding | Status |
+|---|---|---|
+| Secrets in Git | `.env.test` (credentials for a local, disposable test database) was tracked; the demo-data password was a constant in code | **Fixed:** `.env.test` untracked (template `.env.test.example`), demo password only from `DEMO_PASSWORD`. Demo data requires `ALLOW_DEMO_DATA=true` and is refused in production. The old test credentials remain in Git history; they were local development values only. Never reuse them. |
+| Configuration | No production template | `.env.production.example` added. The build needs no secrets, and the service reads `/etc/catalog/catalog.env` (640, root:catalog). |
+| Monitoring endpoint | Needed for uptime checks | `GET /api/health`: public by design, returns only `ok`/`indisponibil` (200/503), no version or internal details. |
+| Error pages | The framework's root error page was in English | Romanian `global-error` page without technical details. |
+| Login UX | With a wrong password the page reloaded without showing the (generic) error message | **Fixed** in the client (only an expired session redirects). No security impact. |
+| Backup/restore | Restore could interfere with audit triggers | Verified: `pg_dump` loads data before recreating triggers; the restored audit keeps ids, timestamps and hashes and the chain verifies intact. Scripts in `deploy/`. |
+| Database | Unindexed foreign keys on growing tables | Indexes added (`production_indexes`); all FKs use `ON DELETE RESTRICT`. |
+| Service hardening | – | systemd unit with `NoNewPrivileges`, `ProtectSystem=strict`, empty capability set, binding to 127.0.0.1 only. The proxy overwrites `X-Forwarded-For` and limits bodies to 3 MB. |
+
 ## 9. Security assumptions
 
-1. The application runs behind a TLS-terminating reverse proxy that the school controls, with `TRUST_PROXY=true` and `client_max_body_size ≈ 3 MB`. Production uses `COOKIE_SECURE=true` and `APP_ORIGIN` set to the public HTTPS origin.
+1. The application runs behind a TLS-terminating reverse proxy that the school controls, with `TRUST_PROXY=true` and `client_max_body_size ≈ 3 MB`. Production uses `COOKIE_SECURE=true` and `APP_ORIGIN` set to the public HTTPS origin (see DEPLOYMENT.md).
 2. The application connects as the least-privilege role (`catalog_app`). Migrations run as `catalog_owner`, whose credentials are not available to the running application.
 3. The database server, backups and the host are administered by trusted personnel; database superusers can bypass application controls, and the hash chain makes such tampering **detectable**, not impossible.
 4. Server clock/NTP is correct (sessions, audit timestamps, 1 September transition in Europe/Bucharest).
@@ -133,7 +146,7 @@ Key guarantees (all tested):
 - **No password history / expiry**, and no session listing/revocation UI for users (sessions are revocable server-side).
 - **In-memory API rate limiter** is per instance. Use a shared store (Redis/PostgreSQL) if the app is scaled horizontally.
 - The audit log is never purged; retention/archival policies (GDPR) must be decided by the school.
-- `.env.test` is committed and contains only credentials for a local, disposable test database.
+- Git history contains an early `.env.test` with local development test-database credentials (not used anywhere else).
 
 ## 11. Future hardening options (the architecture allows them without redesign)
 

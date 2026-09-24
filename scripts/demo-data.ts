@@ -5,11 +5,13 @@
 import type { PrismaClient } from "../src/generated/prisma/client";
 import type { Role, UserStatus } from "../src/generated/prisma/enums";
 
-export const DEMO_PASSWORD = "Demo#Parola2026";
+/** Password of the demo/test accounts – from the environment only (never hard-coded). */
+export const DEMO_PASSWORD = process.env.DEMO_PASSWORD ?? "";
 
 export type DemoIds = Awaited<ReturnType<typeof seedDemo>>;
 
 export async function seedDemo(prisma: PrismaClient, passwordHash: string) {
+  if (!DEMO_PASSWORD) throw new Error("DEMO_PASSWORD lipsește din mediu.");
   const year = await prisma.academicYear.findFirstOrThrow({ where: { status: "ACTIVE" } });
   const cls = async (code: string) =>
     prisma.classSection.findUniqueOrThrow({ where: { academicYearId_code: { academicYearId: year.id, code } } });

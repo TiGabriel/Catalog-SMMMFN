@@ -12,11 +12,12 @@ coverage/
 next-env.d.ts
 /src/generated/
 
-# Environment / secrets – never commit (.env.test only holds local test-DB credentials)
+# Environment / secrets – never commit (only the *.example templates are tracked)
 .env
 .env.*
 !.env.example
-!.env.test
+!.env.production.example
+!.env.test.example
 *.pem
 *.key
 

@@ -1,0 +1,17 @@
+# /etc/caddy/Caddyfile – automatic HTTPS (Let's Encrypt) in front of the application.
+catalog.exemplu.ro {
+	encode zstd gzip
+	request_body {
+		max_size 3MB
+	}
+	reverse_proxy 127.0.0.1:3000 {
+		# Caddy sets X-Forwarded-For with the real client address (TRUST_PROXY=true).
+		header_up X-Real-IP {remote_host}
+	}
+	log {
+		output file /var/log/caddy/catalog-access.log {
+			roll_size 50MiB
+			roll_keep 10
+		}
+	}
+}

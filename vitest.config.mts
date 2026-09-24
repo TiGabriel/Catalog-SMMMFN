@@ -1,7 +1,8 @@
 import { config as loadEnv } from "dotenv";
 import { defineConfig } from "vitest/config";
 
-// Tests always run against the dedicated test database from .env.test.
+// Tests always run against the dedicated, disposable test database from .env.test
+// (copy .env.test.example; in CI the same variables can come from the environment).
 const env = loadEnv({ path: ".env.test", override: true, quiet: true }).parsed ?? {};
 
 export default defineConfig({

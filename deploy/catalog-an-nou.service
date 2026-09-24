@@ -1,0 +1,13 @@
+# /etc/systemd/system/catalog-an-nou.service – safety net for the 1 September transition.
+# The application's own scheduler already does this; running both is safe (idempotent).
+[Unit]
+Description=Trecerea in noul an scolar (Catalog SMMMFN)
+After=postgresql.service
+
+[Service]
+Type=oneshot
+User=catalog
+Group=catalog
+WorkingDirectory=/opt/catalog/app
+EnvironmentFile=/etc/catalog/catalog.env
+ExecStart=/usr/bin/npm run an-nou

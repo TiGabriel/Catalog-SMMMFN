@@ -16,9 +16,12 @@ import { applyGrants } from "../scripts/db-grants";
 import { TEMPLATE_DB, recreateDatabase, testDbName, withDatabase } from "./db";
 
 export default async function setup() {
-  const env = loadEnv({ path: ".env.test", override: true, quiet: true }).parsed ?? {};
-  const ownerUrl = env.MIGRATION_DATABASE_URL!;
-  const appUrl = env.DATABASE_URL!;
+  const env = { ...process.env, ...(loadEnv({ path: ".env.test", override: true, quiet: true }).parsed ?? {}) };
+  const ownerUrl = env.MIGRATION_DATABASE_URL;
+  const appUrl = env.DATABASE_URL;
+  if (!ownerUrl || !appUrl || !env.DEMO_PASSWORD) {
+    throw new Error("Configurați .env.test (vezi .env.test.example): DATABASE_URL, MIGRATION_DATABASE_URL, DEMO_PASSWORD.");
+  }
   if (testDbName(ownerUrl) !== "catalog_test" || testDbName(appUrl) !== "catalog_test") {
     throw new Error("Refuz să folosesc o bază de date care nu este baza de test (catalog_test).");
   }

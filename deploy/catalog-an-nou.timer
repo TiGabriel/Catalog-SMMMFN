@@ -1,0 +1,10 @@
+# /etc/systemd/system/catalog-an-nou.timer – daily at 00:15; executes only when due (1 September).
+[Unit]
+Description=Verificare zilnica trecere an scolar
+
+[Timer]
+OnCalendar=*-*-* 00:15:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

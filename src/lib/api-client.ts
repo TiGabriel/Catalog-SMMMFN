@@ -18,7 +18,10 @@ export async function api<T = unknown>(method: string, url: string, body?: unkno
     });
     const json = await res.json().catch(() => null);
     if (res.ok) return { ok: true, data: json as T };
-    if (res.status === 401 && typeof window !== "undefined") window.location.assign(new URL("/autentificare", window.location.origin));
+    // Expired/missing session → back to the login page. Wrong credentials (also 401) must stay on the form.
+    if (res.status === 401 && json?.error?.code === "NEAUTENTIFICAT" && typeof window !== "undefined") {
+      window.location.assign(new URL("/autentificare", window.location.origin));
+    }
     return {
       ok: false,
       status: res.status,

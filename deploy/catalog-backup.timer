@@ -1,0 +1,11 @@
+# /etc/systemd/system/catalog-backup.timer – daily at 02:30 (server time)
+[Unit]
+Description=Backup zilnic Catalog SMMMFN
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

@@ -1,133 +1,79 @@
 # PROJECT_STATUS – Catalog electronic SMMMFN
 
 Electronic gradebook for **Școala Militară de Maiștri Militari a Forțelor Navale „Amiral Ion Murgescu”**. The UI is entirely in Romanian.
-The full design is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-_Last updated: 2026-09-23. Phase: **5 – Security audit (completed)**_
+_Last updated: 2026-09-24 · Status: **ready for production deployment** (phases 0–6 completed)_
 
-## Current state
-- Next.js 16 (App Router) + TypeScript, PostgreSQL 16 with Prisma 7 (`@prisma/adapter-pg`), Zod 4, argon2id, Vitest 5.
-- Phase 1 (foundation): database schema, integrity triggers, authentication, sessions, RBAC with scope, audit, administrator/catalog APIs.
-- Phase 2 (gradebook core): complete grade lifecycle (create/modify/delete with reason, history), special correction workflow, conduct / practical training / module exam, module plans, configurable results engine, Romanian UI (catalog, grade entry, history, results, corrections, administration of subjects/modules/assignments/students).
+Related documents: [`README.md`](README.md) (development) · [`DEPLOYMENT.md`](DEPLOYMENT.md) (production) · [`SECURITY.md`](SECURITY.md) · [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · [`docs/ORAR_IMPORT.md`](docs/ORAR_IMPORT.md)
 
-## How to run locally
-```bash
-cp .env.example .env            # fill in the connection strings
-npm install                     # also runs `prisma generate`
-npm run db:migrate              # migrations + least-privilege grants for the application role
-npm run db:seed                 # base structure (companies, classes, subjects, grade reasons, ranks, time slots)
-npm run creeaza-admin           # first administrator (CLI only)
-npm run db:seed:demo            # optional: demo data (never in production)
-npm test                        # rebuilds the catalog_test database and runs all tests
-```
-Two PostgreSQL roles are used: `catalog_owner` (migrations) and `catalog_app` (the application, least privilege).
+## 1. Current status
+- All planned functionality is implemented, tested and documented. The production build succeeds without secrets, `npm audit` reports 0 known vulnerabilities, and 134 automated tests + 67 end-to-end browser checks pass.
+- Installation was rehearsed from scratch (fresh DB → migrations → grants → seed → admin CLI → production start), and a backup → restore cycle was verified (identical data, intact audit chain).
+- Still open: official data from the school (averaging rules, bell schedule, ranks, specializations) and the recommended hardening before exposure to the Internet (2FA, network restriction – see §7).
 
-## Architecture decisions
-| # | Decision |
+## 2. Architecture (summary)
+| Area | Decision |
 |---|---|
-| D1 | Next.js + TypeScript monolith. **PostgreSQL + Prisma**, Zod, Tailwind (UI in the next phases). |
-| D2 | All DB access happens in `src/server/**` (`server-only`, enforced by an ESLint rule). Routes are thin. Every service receives the server-resolved `Actor` and calls `authz` before any data access. |
-| D3 | **Server-side sessions**: a 256-bit token in the `__Host-sesiune` cookie (HttpOnly, Secure, SameSite=Strict); only its SHA-256 hash is stored in the DB. Idle timeout 30 min, absolute timeout 12 h. |
-| D4 | **DIRIGINTE is derived** from an active `HomeroomAssignment`. Stored roles: ADMINISTRATOR, COMANDANT_UNITATE, PROFESOR, ELEV. |
-| D5 | **Nothing historical is physically deleted**: every FK uses `ON DELETE RESTRICT`, plus DB triggers that reject DELETE/TRUNCATE on historical tables. |
-| D6 | **Append-only, hash-chained audit**: the DB trigger sets `id`, `occurred_at`, `prev_hash` and `hash`; UPDATE/DELETE/TRUNCATE are rejected even for the owner; the app role has no UPDATE/DELETE grants. |
-| D7 | Class-per-year model: `ClassSection` + `Cohort` (promoție). 112 → 212 share one cohort. |
-| D8 | Role → permission matrix in **code** (`src/server/authz/permissions.ts`), reviewed and tested and not editable at runtime. Roles are stored per user in the DB. |
-| D9 | Out-of-scope resources return **404**, and every denial is audited (`ACCESS_DENIED`). |
-| D10 | The client receives only capability flags (`/api/auth/me`), never the role name. |
+| Stack | Next.js 16 (App Router, server-rendered) + TypeScript, PostgreSQL 16, Prisma 7 (`@prisma/adapter-pg`), Zod 4, argon2id, Tailwind 4, ExcelJS |
+| Layering | All data access is in `src/server/**` (`server-only`, ESLint rule). Pages and API routes call services that receive the server-resolved `Actor` and run authorization + scoped queries |
+| Sessions | Server-side, 256-bit token in the `__Host-sesiune` cookie (HttpOnly/Secure/SameSite=Strict), hash in the DB, idle 30 min / absolute 12 h |
+| Authorization | Role → permission matrix in code + relationship scope (assignments, homeroom, own enrollment) from the DB; 404 for out-of-scope objects, denials audited |
+| History | Nothing academic is physically deleted (FK `RESTRICT` + triggers). Class per year + cohort (112 → 212). Revisions, snapshots and audit are immutable |
+| Audit | Append-only, SHA-256 hash chain set by a DB trigger, verifiable (`audit_log_verify_chain()`) |
+| Averages | Versioned rule sets (JSON), pure calculation engine, frozen snapshots when a module closes |
+| Background work | In-process scheduler + CLI/systemd timer for the idempotent year transition on 1 September |
 
-## Database entities (implemented – `prisma/schema.prisma`)
-- **Identity:** `User` (firstName, lastName, rank?, username, passwordHash, role, status ACTIVE/INACTIVE/DELETED, mustChangePassword), `Rank`, `Session`, `LoginAttempt`
-- **Structure:** `AcademicYear` (PLANNED/ACTIVE/CLOSED, only one active), `Company` (Compania 1 = anul II, Compania 2 = anul I), `Specialization`, `Cohort` (promoție), `ClassSection`, `Student` (optional link to `User`), `Enrollment`, `YearRollover`
-- **Curriculum:** `Subject` (GENERAL / SPECIALIZATION / PRACTICAL_TRAINING / CONDUCT), `Module`, `ModuleSubject`
-- **Assignments:** `TeachingAssignment` (kind: SUBJECT_TEACHING / PRACTICAL_TRAINING / MODULE_EXAM), `HomeroomAssignment` (one active per class). They are ended, never deleted.
-- **Grades:** `GradeReason` (configurable), `Grade` (1–10, CHECK constraint; original author immutable; soft delete), `GradeRevision` (immutable), `GradeCorrectionRequest`
-- **Results:** `AveragingRuleSet` (versioned, frozen after activation), `ModuleResultSnapshot` (immutable)
-- **Timetable:** `TimeSlot`, `TimetableVersion`, `TimetableEntry`, `TimetableOverride`, `TimetableImport`
-- **System:** `AuditLog`, `SystemSetting` (keys whitelisted and validated)
-- DB integrity (migration `20260923200500_integrity`): CHECK constraints, no-delete triggers, immutable revisions, grade identity (author/student/class/subject) immutable, single active year / enrollment / homeroom teacher, audit hash chain + `audit_log_verify_chain()`.
+## 3. Implemented features
+**Roles:** ADMINISTRATOR, COMANDANT UNITATE, PROFESOR, DIRIGINTE (derived from homeroom assignment), ELEV (optional, disabled by default).
 
-## Initial structure (seed)
-- Compania 1 (anul II): 211, 212, 213, 214, 215, 224, 225. Compania 2 (anul I): 111, 112, 113, 114, 115, 124, 125.
-- Academic year 2026–2027 (active), system subject „Purtare”, „Instruire practică”, grade reasons (Testare, Ascultare, Activitate la clasă, Caiet, Proiect, Altă activitate + Examen final de modul, Notă la purtare), military ranks, 7 time slots.
+- **Authentication:** login/logout, argon2id, password policy (length, uppercase, digit, special, no username, no common words), mandatory change of temporary passwords, per-username/IP throttling (serialized), session rotation, deactivation revokes sessions, first administrator only through the CLI.
+- **Administration:** users (create, edit, role, reset password, deactivate/delete with reason), academic years, classes, students (identity + enrollment history; no transfers), subjects, modules + module plans (subject, final exam, weight), teaching/practical-training/examiner assignments (module-scoped, conflict-checked), homeroom teachers, configuration (settings, grade reasons, versioned averaging rules), timetable import.
+- **Grades:** 1–10 (integers by default), reason/type from a configurable list, module, class, year, original author, timestamps. Modify/delete only by the author within the configurable window, with a mandatory reason, optimistic versioning, immutable revisions, soft delete and full audit.
+- **Special categories:** conduct (only the class's homeroom teacher, one per module), practical training (only the assigned instructor), module exam (only the designated examiner, one per module).
+- **Correction workflow:** teacher request (MODIFY/DELETE, justification) → COMANDANT UNITATE approves/rejects. Approval applies exactly the proposal, atomically and audited. The administrator has no role in it.
+- **Module results:** per-subject final, exam, practical training, conduct and module average. The rules are configurable and currently marked provisional in the UI. Snapshot on closing.
+- **Academic years:** automatic transition on 1 September (111→211 … 125→225, same cohort), graduation (accounts deactivated, history kept), new year I classes, old modules closed, old assignments ended. Idempotent. History can be viewed by year.
+- **Timetable:** versioned Excel template, validation with row/column, draft → preview (diff) → publish, archive/restore without loss, weekly view (previous/current/next week, date picker, odd/even weeks); teachers see only their own lessons.
+- **Dashboards** by role; **reports** (class catalog, averages, module results, school-year results, student situation, academic record sheet, general situation) with **Excel export** and **print/PDF** layouts; reports respect the same authorization.
+- **Audit UI:** administrator = complete system audit; commander = academic audit + oversight of administrator actions that affect grading (without technical data); filters by date, user, student, class, subject, action, year; integrity check.
+- **UI:** Romanian, responsive (mobile/tablet/desktop), light/dark/system theme, navy/gold institutional identity, accessible (contrast, focus, ARIA), no monospaced fonts, print styles.
+- **Operations:** `/api/health` (availability + DB), backup/restore scripts, systemd units, Caddy/Nginx configurations, production configuration template.
 
-## Authentication
-- `POST /api/auth/login`: generic message for every failure (unknown user, wrong password, inactive account, student accounts disabled); dummy argon2 verification for unknown users (uniform timing).
-- Throttling: 5 failures per username / 15 min (counted even for nonexistent usernames), 20 failures per IP, then 429. Everything is recorded in `LoginAttempt` + audit.
-- Password: min. 8 characters, uppercase, digit, special character, max. 128, must not contain the username; argon2id (19 MiB, t=2).
-- `mustChangePassword` after creation/reset: every endpoint except me/logout/change-password returns 403 until the password is changed.
-- Reset/deactivation/role change → all of the user's sessions are revoked. A password change revokes the other sessions.
-- CSRF: exact `Origin` check + `application/json` required for mutations, plus SameSite=Strict.
+## 4. Database
+- Migrations (`prisma/migrations`): `init`, `integrity` (CHECK constraints, triggers, audit chain), `gradebook_results` (rule sets, snapshots, protections), `production_indexes`.
+- Foreign keys: all use `ON DELETE RESTRICT`. History protection: DELETE/TRUNCATE rejected on 19 historical tables, immutable revisions/snapshots/audit, immutable grade identity, single active year/enrollment/homeroom teacher.
+- Indexes: primary/unique keys + indexes for the heavy queries (grades by class/subject/module/year, enrollments by year, assignments, correction requests, audit filters). Unindexed FKs point only to small lookup tables.
+- Transactions: every change + its revision + its audit entry in the same transaction; advisory locks for login, audit chain, year transition and single-grade kinds; optimistic versioning for grades; atomic "claim" for correction review.
+- Least privilege: the `catalog_app` role has no DELETE on history and no UPDATE/DELETE on the audit log (`scripts/db-grants.ts`).
+- Backup: daily `pg_dump` (custom format, checksum, optional GPG, retention) + restore into an empty database with verification (tested).
 
-## Authorization matrix (enforced on the server)
-| Capability | ADMIN | COMANDANT | PROFESOR | DIRIGINTE (own class) | ELEV |
-|---|---|---|---|---|---|
-| Users, passwords | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Years, classes, subjects, modules, students | ✅ manage | read | ❌ | ❌ | ❌ |
-| Teaching/homeroom assignments | ✅ (not to self) | read | ❌ | ❌ | ❌ |
-| Configuration | ✅ | read | ❌ | ❌ | ❌ |
-| Class roster | ✅ | ✅ | assigned classes | own class | ❌ |
-| Grade reading | ❌ | ✅ all | assigned class+subject | all subjects of own class | own grades |
-| Grade creation | ❌ | ❌ | assigned class+subject (+kind: teaching / practical / module exam) | conduct only in own class | ❌ |
-| Audit | ✅ | ✅ | ❌ | ❌ | ❌ |
-| Timetable | all | all | own lessons | + own class | own class |
+## 5. Tests performed
+| Type | Scope | Result |
+|---|---|---|
+| Unit (`tests/unit`) | password policy, permission matrix, results engine | pass |
+| Integration (`tests/integration`, real PostgreSQL, isolated DB per file) | authentication, authorization/IDOR per role, gradebook (entry/modification/deletion/corrections/conduct/practical/exam/modules), DB integrity (append-only audit, no deletion, constraints), year transition (mapping, idempotency, graduation, history), timetable (validation, versions, weeks, isolation), reports + audit (per role, Excel, filters), security (fixation, brute force, zip bomb, body limits, separation of duties, history after deletions) | **134/134 pass** |
+| End-to-end in the browser (production mode, freshly installed DB) | login (incl. error message), all admin pages, account creation, Excel import + publish, grade entry, correction request + commander approval, audit, reports, Excel download, PDF print, homeroom conduct + results, dark mode, student + mobile (no horizontal overflow), mandatory password change, Romanian localization check on every visited page | **67/67 pass**, no browser errors |
+| Operational | build without secrets, start in production mode, `/api/health` (200/503/recovery), security headers, installation from scratch, backup → restore | pass |
+| Static | `tsc --noEmit`, ESLint, `prisma validate`, `prisma migrate diff` (no drift), `npm audit` | clean |
 
-## Implemented API
-Phase 2: `/api/grades/[id]` (GET history, PATCH), `/api/grades/[id]/delete`, `/api/grades/mine`, `/api/corrections` (GET/POST), `/api/corrections/[id]`, `/api/corrections/[id]/review`, `/api/corrections/[id]/cancel`, `/api/classes/[id]/modules/[moduleId]/results`, `/api/admin/modules/[id]/subjects`, `/api/admin/module-subjects/[id]`, `/api/admin/students/[id]`, `/api/admin/subjects/[id]` (GET), `/api/admin/rule-sets`, `/api/admin/rule-sets/[id]/activate`.
-Phase 1: `/api/auth/{login,logout,me,change-password}` · `/api/admin/{users,users/[id],users/[id]/status,users/[id]/reset-password,ranks,companies,specializations,teachers,academic-years,academic-years/[id]/status,classes,classes/[id],subjects,subjects/[id],modules,modules/[id],students,assignments,assignments/[id]/end,homeroom-assignments,homeroom-assignments/[id]/end,settings,settings/[key],grade-reasons,grade-reasons/[id]}` · `/api/classes`, `/api/classes/[classId]`, `/api/classes/[classId]/subjects/[subjectId]/grades`, `/api/students/[studentId]`, `/api/grades` (POST), `/api/grade-reasons`, `/api/timetable`, `/api/me/grades`, `/api/audit`, `/api/audit/verify`.
+Bug found and fixed during the final check: with a wrong password, the login page reloaded and did not show the error message (the client treated any 401 as an expired session).
 
-## Tests (134, all passing – `npm test`)
-- `tests/integration/security.test.ts`: session fixation and rotation, parallel brute force, credentials not stored in the audit, student sessions when the feature is disabled, weak passwords, per-session limit, chunked JSON bodies, zip bomb with false sizes, security headers, IDOR on grades, commander oversight of the administrator (without data about administrators), concurrent conduct grades, history kept after deactivating/deleting teacher and student accounts.
-- `tests/integration/reports-audit.test.ts`: reports per role (teacher only own classes/subjects, including Excel; diriginte own class; commander everything; administrator no grades; student only their own record sheet), invalid parameters, formula injection in Excel; audit: 403 for normal users, the commander only academic and without technical data, the administrator complete, all filters.
-- `tests/integration/rollover.test.ts`: 1xy→2xy mapping with the same cohort, promotion exactly once (concurrent runs), not before 1 September / only by admin, graduation + account deactivation, history preserved (grades, revisions, assignments, snapshots, audit), history access (commander yes, teacher no, new assignments do not change the past).
-- `tests/integration/timetable.test.ts`: template, row-level validation (class/day/slot/subject/teacher/inactive teacher/conflicts/formulas/odd-even), non-Excel files, missing columns, macros and zip bombs, dates outside the year, resolution per week, odd/even weeks, teacher isolation, versions (a new upload does not destroy, archive restores, republish), authorization (403 for non-admins, foreign Origin).
-Each integration file starts from a fresh copy of a template database (`tests/db.ts`), so the tests are independent of each other.
-- `tests/unit/results-engine.test.ts`: rounding, weighted mean with the exam, missing items, rules changed without code.
-- `tests/integration/gradebook.test.ts`: valid/invalid grade, other class/subject, modify/delete with mandatory reason + audit + revisions, optimistic versioning, another teacher's grade (403/404), edit window → correction, conduct only by the class diriginte, practical training only by the assigned teacher, exam only by the designated examiner, correction workflow (approve/reject/cancel/delete), commander and administrator cannot edit/approve directly, module plan, closing a module → snapshot + grading blocked, conflicting assignments, students cannot be moved.
-- `tests/unit`: password policy, permission matrix.
-- `tests/integration/auth.test.ts`: valid/invalid login, unknown user, inactive user, brute force → 429, logout, forged/expired cookie, CSRF, mandatory password change, admin reset, deactivation revokes sessions, student accounts disabled, no password hashes in responses.
-- `tests/integration/authorization.test.ts`: teacher own class / another class / another subject / another student / another teacher in the timetable; diriginte own class / other class / conduct / subjects; administrator (management, no grades, no self-assignment); commander (global read, no writes); student isolation; losing access when an assignment ends.
-- `tests/integration/db-integrity.test.ts`: append-only audit (app role and owner), tamper detection, no deletion of historical data, grade identity immutable, 1–10 constraint, single active year/enrollment.
+## 6. Deployment requirements (summary – details in DEPLOYMENT.md)
+Linux + systemd, Node.js 22, PostgreSQL 16 (roles `catalog_owner`/`catalog_app`), reverse proxy with HTTPS (Caddy/Nginx), domain name, environment variables from `.env.production.example`, daily backup copied off-site, `/api/health` monitoring.
 
-## Phase 2 – Gradebook core (implemented)
-**Relationships:** Teacher → Subject → Module → Class → Academic year = `TeachingAssignment` (kind SUBJECT_TEACHING / PRACTICAL_TRAINING / MODULE_EXAM; `moduleId` null = all modules). A teacher can have any number of subjects/classes/modules. Conflicts rejected: one responsible teacher per (class, subject, kind, module scope); an "all modules" assignment overlaps module-specific ones. Substitutes: prepared through bounded validity (`validFrom/validTo`); a future `role = SUBSTITUTE` field will not change the model.
-**Module plan:** `ModuleSubject` (subject in module, `hasFinalExam`, weight, hours). A grade requires a valid module (same year and year of study as the class, OPEN) and a subject in the module plan (except conduct, which belongs to every module).
-**Grade rules (server):**
-- Create: an active assignment of exactly the required type (predare/practică/examinator for that module; diriginte for conduct) + an active enrollment of the student in the class + value 1–10 (integer by default) + valid reason for the grade type + date within the year and not in the future. Conduct and the module exam: one active grade per student/module.
-- Modify / delete: **only the author**, still assigned, open module, active year, within the `grades.editWindowDays` window (default 7) and with optimistic versioning. A **mandatory reason**. Deletion = soft delete (`status=DELETED`, who/when/why). Each change → immutable `GradeRevision` + audit with old/new value, student, class, subject, module, IP, user agent, session, request id.
-- Otherwise → **correction request** (409 `CORECTIE_NECESARA`).
-**Correction workflow:** the teacher who holds the assignment → `MODIFY`/`DELETE` request with justification (one pending request per grade) → **COMANDANT UNITATE** approves/rejects. The approval applies *exactly* the proposed value, atomically, through the same revision/audit path (the request is "claimed" atomically, so it cannot be applied twice). The commander cannot choose another value and has no direct editing endpoint. **The ADMINISTRATOR does not take part in the workflow** (the architecture does not require it): they have neither editing nor approval rights. Audit: `CORRECTION_REQUEST_CREATE/APPROVE/REJECT/CANCEL` + `GRADE_UPDATE/DELETE` with `approvedById`.
-**Results (configurable):** `src/server/results/engine.ts` (pure calculation) + `AveragingRuleSet` (versioned JSON, frozen after activation). Parameters: rounding, subject final (mean / weighted with exam, exam weight, minimum grades), conduct (last/mean, included or not), practical training (included or not), module average (simple mean / weighted by `ModuleSubject.weight`). The seed activates **provisional rules** (marked in the UI). Closing a module → immutable `ModuleResultSnapshot` for every class. Results visible to: commander (all), diriginte (own class).
-**Students:** create with enrollment, edit identity data; **there is no endpoint for moving between classes** (fields other than identity are rejected).
+## 7. Known limitations
+- The averaging rules, bell schedule, military ranks and specializations are **provisional** (configurable; they must be confirmed by the school).
+- No 2FA yet; the administrator controls identities (mitigated through commander audit oversight). Recommended: 2FA + access through the school network/VPN before public exposure.
+- PDF only through the browser's print function (print layouts); there is no server-side PDF generation.
+- There is no UI for marking repeating students (the model supports `REPEATING`), for one-off timetable changes on a given date (they are displayed if they exist) or for substitute teachers.
+- Attendance is not implemented (the architecture leaves room for it). Student accounts exist but are disabled by default.
+- The API rate limiter is in memory (per instance); the audit log has no archiving policy (it is permanent by design).
+- No Docker image is provided (the deployment is native, systemd + reverse proxy; verified).
 
-## Phase 2 – UI (Romanian, responsive, light/dark)
-Next.js App Router + Tailwind 4, self-hosted Inter font, navy/gold identity, nonce-based CSP per request (`src/proxy.ts`). Pages: `/autentificare`, `/schimbare-parola`, `/panou` (by role), `/catalog`, `/catalog/clase/[id]`, `/catalog/clase/[id]/materii/[subjectId]` (grades + entry), `/catalog/note/[id]` (details, history, modify/delete/correction request), `/catalog/elevi/[id]`, `/catalog/clase/[id]/rezultate/[moduleId]` (print-ready), `/catalog/notele-mele`, `/cereri-corectie`, `/elev`, `/administrare/{elevi,materii,module,repartizari}`. Navigation is generated on the server from capabilities; pages call the services (the same authorization as the API) and turn 403/404 into a 404 page.
-
-## Phase 3 – Academic years, promotion, history, timetable (implemented)
-**Academic years:** persistent (`2026–2027`, `2027–2028`, …), PLANNED → ACTIVE → CLOSED; every grade/enrollment/assignment/class belongs to a year. Closed years are read-only.
-**Automatic transition (`src/server/domain/rollover.ts`):**
-- On **1 September** (Europe/Bucharest time, independent of the server's timezone): 111→211, 112→212, 113→213, 114→214, 115→215, 124→224, 125→225 (new classes in the new year, **same cohort/promoție**); year I students → `PROMOTED` + active enrollment in 2xy; year II → `GRADUATED` (student `GRADUATED`, student account `INACTIVE` + sessions revoked); new, empty year I classes (suffixes from `school.classSuffixes`); still-open modules are closed with **result snapshots**; the old year's assignments are ended (not deleted); the old year → `CLOSED`, the new one → `ACTIVE`. Repeating students (`REPEATING` enrollment) stay in the same year of study.
-- **Server-side, not in the browser:** in-process scheduler (`src/instrumentation.ts` → `src/server/jobs/scheduler.ts`, hourly) in `AUTO` mode (default; `MANUAL_CONFIRM` configurable) + CLI `npm run an-nou` for an OS cron/systemd timer + manual execution from the administrator UI (only after 1 September).
-- **Idempotent:** advisory lock, refusal before the date, a unique `year_rollovers(from,to)` record, and no re-enrollment of students who already have an enrollment in the new year. Two concurrent runs → exactly one executes (tested).
-**History:** the commander selects any academic year in the catalog; the administrator views classes/students/modules for any year. Historical classes show their own roster (promoted/graduated), teachers and diriginte **from that year** (assignments are tied to the class of that year, so they never inherit later assignments). Teachers have no historical access (scope = active year only). Grades, revisions, snapshots and audit remain linked to the old year.
-**Timetable:** Excel template v1 (`docs/ORAR_IMPORT.md`, downloadable with reference sheets) → upload (multipart, Origin check, ≤ 2 MB, ZIP/zip-bomb/VBA-macro check before parsing, no formulas) → report with **row + column** for every error (unknown class/teacher/subject/day/time slot, inactive teacher, class/teacher conflicts with odd/even weeks and groups) and warnings (teacher without an assignment, room occupied) → draft version → **preview with diff** → publishing. **Versioning without loss:** for each week, the published version with the latest start date covering it; archiving restores the previous version; republishing is possible; the files are kept (SHA-256). Weekly view `/orar`: previous/current/next week + date picker, odd/even weeks; teacher = own lessons only (+ homeroom class), admin/commander = everything with class/teacher filters, student = own class.
-**UI:** `/orar`, `/administrare/orar`, `/administrare/orar/[id]`, `/administrare/ani-scolari` (transition preview, manual execution, history), `/administrare/clase` (by year), year selector in `/catalog` (commander) and `/administrare/elevi`.
-**Dependencies:** `exceljs` (with the `uuid` override to a patched version). Overrides for `deepmerge-ts`/`mysql2` (transitive dependencies of the Prisma CLI) → `npm audit`: 0 vulnerabilities.
-
-## Pending work (roadmap)
-- Before production: 2FA for ADMINISTRATOR / COMANDANT UNITATE, deployment (Docker + reverse proxy + backups), official rules and data (averages, time slots, ranks, specializations), UI for repeating students, audit retention policy.
-
-## Important security decisions
-- The permission matrix lives in code, not in the DB (it cannot be escalated through configuration).
-- The administrator has no grade permission. They cannot assign themselves classes, change their own role, or deactivate the last administrator.
-- IP-based limits apply only behind a trusted reverse proxy (`TRUST_PROXY=true`, right-most `X-Forwarded-For` entry). Without a proxy, only the per-username limit applies.
-- In production, `COOKIE_SECURE=false` is rejected at startup.
-- The first administrator is created only from the CLI (`npm run creeaza-admin`).
-
-## Known uncertainties
-1. Averaging formulas, number/dates of modules, specializations of the 1x/2x classes.
-2. Teacher edit window (default 7 days, configurable), integer vs. decimal grades (default integers).
-3. Official rank list and bell schedule (seed values are provisional).
-4. Hosting (on-premise vs. EU cloud), MApN requirements, 2FA before going online.
-5. The official bell schedule and the final timetable template format (v1 is documented and versioned; extra columns can be added without breaking).
-6. Repeating students: the model supports them (`REPEATING` enrollment), but there is no UI for marking them yet.
+## 8. Recommended next steps
+1. Confirm the school's data with the school (averaging rules, time slots, ranks, specializations, class list) and configure them in the UI.
+2. 2FA (TOTP/WebAuthn) for ADMINISTRATOR and COMANDANT UNITATE; access restricted to the network/VPN.
+3. Pilot deployment (one company, one module) with training for administrators and teachers; review the audit after the first weeks.
+4. UI for repeating students / withdrawals and for one-off timetable changes; substitute teachers.
+5. Attendance module (records linked to timetable lessons).
+6. Optional: shared store for rate limiting (multiple instances), WAL/PITR backups, audit shipping to SIEM/WORM, Docker image, CI (GitHub Actions: lint, typecheck, tests against PostgreSQL, build).

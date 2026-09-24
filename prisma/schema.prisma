@@ -297,6 +297,7 @@ model Enrollment {
 
   @@index([classSectionId, status])
   @@index([studentId])
+  @@index([academicYearId, status])
   @@map("enrollments")
 }
 
@@ -438,6 +439,8 @@ model TeachingAssignment {
 
   @@index([teacherId, academicYearId])
   @@index([classSectionId, subjectId])
+  @@index([academicYearId, endedAt])
+  @@index([subjectId])
   @@map("teaching_assignments")
 }
 
@@ -463,6 +466,7 @@ model HomeroomAssignment {
 
   @@index([teacherId, academicYearId])
   @@index([classSectionId])
+  @@index([academicYearId])
   @@map("homeroom_assignments")
 }
 
@@ -548,7 +552,10 @@ model Grade {
   correctionRequests GradeCorrectionRequest[]
 
   @@index([classSectionId, subjectId, status])
+  @@index([classSectionId, moduleId, status])
+  @@index([moduleId, subjectId])
   @@index([studentId, academicYearId])
+  @@index([academicYearId, createdAt])
   @@index([authorId])
   @@map("grades")
 }
@@ -624,6 +631,8 @@ model GradeCorrectionRequest {
   revisions GradeRevision[]
 
   @@index([status])
+  @@index([gradeId])
+  @@index([requestedById, status])
   @@map("grade_correction_requests")
 }
 
@@ -845,6 +854,8 @@ model AuditLog {
   @@index([actorId, occurredAt])
   @@index([action, occurredAt])
   @@index([entityType, entityId])
+  @@index([studentId])
+  @@index([classSectionId])
   @@map("audit_log")
 }
 

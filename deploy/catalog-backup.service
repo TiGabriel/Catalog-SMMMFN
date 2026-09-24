@@ -1,0 +1,13 @@
+# /etc/systemd/system/catalog-backup.service – run by catalog-backup.timer
+[Unit]
+Description=Backup baza de date Catalog SMMMFN
+After=postgresql.service
+
+[Service]
+Type=oneshot
+User=catalog
+Group=catalog
+WorkingDirectory=/opt/catalog/app
+EnvironmentFile=/etc/catalog/catalog.env
+Environment=BACKUP_DIR=/var/backups/catalog
+ExecStart=/opt/catalog/app/deploy/backup.sh
