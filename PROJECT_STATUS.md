@@ -9,7 +9,7 @@ Related documents: [`README.md`](README.md) (development) · [`DEPLOYMENT.md`](D
 ## 1. Current status
 - All planned functionality is implemented, tested and documented. The production build succeeds without secrets, `npm audit` reports 0 known vulnerabilities, and 134 automated tests + 67 end-to-end browser checks pass.
 - Installation was rehearsed from scratch (fresh DB → migrations → grants → seed → admin CLI → production start), and a backup → restore cycle was verified (identical data, intact audit chain).
-- Still open: official data from the school (averaging rules, bell schedule, ranks, specializations) and the recommended hardening before exposure to the Internet (2FA, network restriction – see §7).
+- Still open: official data from the school (averaging rules, bell schedule, ranks, specializations) and the recommended hardening before exposure to the Internet (2FA, network restriction – see §8).
 
 ## 2. Architecture (summary)
 | Area | Decision |
@@ -47,7 +47,7 @@ Related documents: [`README.md`](README.md) (development) · [`DEPLOYMENT.md`](D
 - Least privilege: the `catalog_app` role has no DELETE on history and no UPDATE/DELETE on the audit log (`scripts/db-grants.ts`).
 - Backup: daily `pg_dump` (custom format, checksum, optional GPG, retention) + restore into an empty database with verification (tested).
 
-## 6. Security audit (phase 5) – summary
+## 5. Security audit (phase 5) – summary
 Full report: [`SECURITY.md`](SECURITY.md) §8 (audit results) and §8b (production review). All 30 requested areas and all role, audit and history checks were verified and are covered by automated tests (`tests/integration/security.test.ts` + `auth`, `authorization`, `gradebook`, `db-integrity`, `rollover`, `reports-audit`).
 
 **Vulnerabilities found → fixes**
@@ -71,7 +71,7 @@ Full report: [`SECURITY.md`](SECURITY.md) §8 (audit results) and §8b (producti
 
 **Remaining risks:** administrator trust (they control identities – mitigated through commander oversight; 2FA recommended), temporary lockout of a known username (DoS), CSP `style-src 'unsafe-inline'`, in-memory limiter per instance, audit retention to be decided, early test credentials remaining in Git history (local values only).
 
-## 5a. Tests performed
+## 6. Tests performed
 | Type | Scope | Result |
 |---|---|---|
 | Unit (`tests/unit`) | password policy, permission matrix, results engine | pass |
@@ -82,10 +82,10 @@ Full report: [`SECURITY.md`](SECURITY.md) §8 (audit results) and §8b (producti
 
 Bug found and fixed during the final check: with a wrong password, the login page reloaded and did not show the error message (the client treated any 401 as an expired session).
 
-## 6. Deployment requirements (summary – details in DEPLOYMENT.md)
+## 7. Deployment requirements (summary – details in DEPLOYMENT.md)
 Linux + systemd, Node.js 22, PostgreSQL 16 (roles `catalog_owner`/`catalog_app`), reverse proxy with HTTPS (Caddy/Nginx), domain name, environment variables from `.env.production.example`, daily backup copied off-site, `/api/health` monitoring.
 
-## 7. Known limitations
+## 8. Known limitations
 - The averaging rules, bell schedule, military ranks and specializations are **provisional** (configurable; they must be confirmed by the school).
 - No 2FA yet; the administrator controls identities (mitigated through commander audit oversight). Recommended: 2FA + access through the school network/VPN before public exposure.
 - PDF only through the browser's print function (print layouts); there is no server-side PDF generation.
@@ -94,7 +94,7 @@ Linux + systemd, Node.js 22, PostgreSQL 16 (roles `catalog_owner`/`catalog_app`)
 - The API rate limiter is in memory (per instance); the audit log has no archiving policy (it is permanent by design).
 - No Docker image is provided (the deployment is native, systemd + reverse proxy; verified).
 
-## 8. Recommended next steps
+## 9. Recommended next steps
 1. Confirm the school's data with the school (averaging rules, time slots, ranks, specializations, class list) and configure them in the UI.
 2. 2FA (TOTP/WebAuthn) for ADMINISTRATOR and COMANDANT UNITATE; access restricted to the network/VPN.
 3. Pilot deployment (one company, one module) with training for administrators and teachers; review the audit after the first weeks.
