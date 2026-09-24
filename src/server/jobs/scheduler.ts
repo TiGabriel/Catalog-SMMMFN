@@ -30,6 +30,11 @@ async function housekeepingJob() {
   }
 }
 
+/** One run of every job, awaited. Used by the Vercel Cron endpoint (src/app/api/cron/jobs/route.ts). */
+export async function runScheduledJobs() {
+  await Promise.all([rolloverJob(), housekeepingJob()]);
+}
+
 export function startScheduler() {
   if (started || process.env.DISABLE_SCHEDULER === "true") return;
   started = true;
