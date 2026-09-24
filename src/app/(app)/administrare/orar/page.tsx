@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Download } from "lucide-react";
-import { Badge, ButtonLink, Card, CardHeader, EmptyState, PageHeader, TableWrap } from "@/components/ui";
+import { Badge, ButtonDownload, Card, CardHeader, EmptyState, PageHeader, TableWrap } from "@/components/ui";
 import { ActionButton } from "@/components/admin/api-form";
 import { TimetableUploadForm } from "@/components/timetable/upload-form";
 import { getPageActor, load } from "@/server/http/page";
@@ -30,9 +30,9 @@ export default async function TimetableAdminPage() {
         subtitle="Încărcați orarul din șablonul Excel, verificați raportul de validare, previzualizați și publicați. Versiunile anterioare nu se pierd."
         actions={
           active && (
-            <ButtonLink href={`/api/admin/timetable/template?academicYearId=${active.id}`} variant="secondary" prefetch={false}>
+            <ButtonDownload href={`/api/admin/timetable/template?academicYearId=${active.id}`} variant="secondary">
               <Download className="h-4 w-4" /> Descarcă șablonul
-            </ButtonLink>
+            </ButtonDownload>
           )
         }
       />

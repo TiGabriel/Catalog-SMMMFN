@@ -31,6 +31,17 @@ export function ButtonLink({
   return <Link className={cn(buttonBase, buttonVariants[variant], buttonSizes[size], className)} {...props} />;
 }
 
+/** File download (API route returning an attachment). A plain anchor, not next/link: a client-side
+ *  router navigation to a non-page response leaves the router stuck and breaks later in-app links. */
+export function ButtonDownload({
+  variant = "primary",
+  size = "md",
+  className,
+  ...props
+}: ComponentProps<"a"> & { href: string; variant?: keyof typeof buttonVariants; size?: keyof typeof buttonSizes }) {
+  return <a download className={cn(buttonBase, buttonVariants[variant], buttonSizes[size], className)} {...props} />;
+}
+
 export function Card({ className, interactive, ...props }: ComponentProps<"div"> & { interactive?: boolean }) {
   return (
     <div

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { FileSpreadsheet } from "lucide-react";
-import { ButtonLink, PageHeader } from "@/components/ui";
+import { ButtonDownload, PageHeader } from "@/components/ui";
 import { PrintButton } from "@/components/print-button";
 import { ReportView } from "@/components/reports/report-view";
 import { getPageContext, load } from "@/server/http/page";
@@ -24,9 +24,9 @@ export default async function ReportPage({ params, searchParams }: { params: Pro
         subtitle={report.subtitle}
         actions={
           <>
-            <ButtonLink href={xlsx} variant="secondary" prefetch={false}>
+            <ButtonDownload href={xlsx} variant="secondary">
               <FileSpreadsheet className="h-4 w-4" /> Excel
-            </ButtonLink>
+            </ButtonDownload>
             <PrintButton label="Tipărește / PDF" />
           </>
         }

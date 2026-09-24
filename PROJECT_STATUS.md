@@ -2,12 +2,12 @@
 
 Electronic gradebook for **Școala Militară de Maiștri Militari a Forțelor Navale „Amiral Ion Murgescu”**. The UI is entirely in Romanian.
 
-_Last updated: 2026-09-24 · Status: **ready for production deployment** (phases 0–6 completed)_
+_Last updated: 2026-09-24 · Status: **ready for production deployment** (phases 0–6 completed, full end-to-end functionality check passed)_
 
 Related documents: [`README.md`](README.md) (development) · [`DEPLOYMENT.md`](DEPLOYMENT.md) (production) · [`SECURITY.md`](SECURITY.md) · [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · [`docs/ORAR_IMPORT.md`](docs/ORAR_IMPORT.md)
 
 ## 1. Current status
-- All planned functionality is implemented, tested and documented. The production build succeeds without secrets, `npm audit` reports 0 known vulnerabilities, and 134 automated tests + 67 end-to-end browser checks pass.
+- All planned functionality is implemented, tested and documented. The production build succeeds without secrets, `npm audit` reports 0 known vulnerabilities, and 134 automated tests + 189 end-to-end browser checks (every role, every page, every main flow) pass.
 - Installation was rehearsed from scratch (fresh DB → migrations → grants → seed → admin CLI → production start), and a backup → restore cycle was verified (identical data, intact audit chain).
 - Still open: official data from the school (averaging rules, bell schedule, ranks, specializations) and the recommended hardening before exposure to the Internet (2FA, network restriction – see §8).
 
@@ -76,11 +76,16 @@ Full report: [`SECURITY.md`](SECURITY.md) §8 (audit results) and §8b (producti
 |---|---|---|
 | Unit (`tests/unit`) | password policy, permission matrix, results engine | pass |
 | Integration (`tests/integration`, real PostgreSQL, isolated DB per file) | authentication, authorization/IDOR per role, gradebook (entry/modification/deletion/corrections/conduct/practical/exam/modules), DB integrity (append-only audit, no deletion, constraints), year transition (mapping, idempotency, graduation, history), timetable (validation, versions, weeks, isolation), reports + audit (per role, Excel, filters), security (fixation, brute force, zip bomb, body limits, separation of duties, history after deletions) | **134/134 pass** |
-| End-to-end in the browser (production mode, freshly installed DB) | login (incl. error message), all admin pages, account creation, Excel import + publish, grade entry, correction request + commander approval, audit, reports, Excel download, PDF print, homeroom conduct + results, dark mode, student + mobile (no horizontal overflow), mandatory password change, Romanian localization check on every visited page | **67/67 pass**, no browser errors |
+| End-to-end functionality check in the browser (production mode, freshly installed DB) | **Start-up:** reachability, assets, `/api/health`, invalid configuration. **Authentication:** valid login, unknown user, wrong password, inactive account, disabled student accounts, cookie flags, persistence (reload/new tab), logout, idle expiry, password validation (client + server), protected URLs without a session. **Administrator:** dashboard, users (create/edit/reset), classes, students (enrol/edit/history), subjects, modules + plan + open, teaching and homeroom assignments (incl. conflict), academic years (transition preview, planned year), timetable (template, import, preview, publish, archive/restore, invalid file), configuration (reasons, rule sets, student accounts), audit (filters, integrity), restrictions. **Commander:** global visibility, grades of any class, student situation, correction approval, grade audit without technical data, cannot create/modify grades, no admin pages. **Teacher:** own timetable only, assigned classes/subjects only, grade entry/validation/modification/deletion with reason, correction request after the edit window, 404 on unrelated classes/subjects, no conduct. **Homeroom teacher:** all subjects of the class, read-only for other teachers' subjects, conduct, module results, other classes only through own assignments. **Student (when enabled):** own grades, own class timetable, 404 elsewhere, mobile layout. Mandatory password change, dark mode, Romanian text on every page | **189/189 pass**, no browser console errors, no unexpected failed requests |
 | Operational | build without secrets, start in production mode, `/api/health` (200/503/recovery), security headers, installation from scratch, backup → restore | pass |
 | Static | `tsc --noEmit`, ESLint, `prisma validate`, `prisma migrate diff` (no drift), `npm audit` | clean |
 
-Bug found and fixed during the final check: with a wrong password, the login page reloaded and did not show the error message (the client treated any 401 as an expired session).
+Bugs found and fixed during the final checks:
+- With a wrong password, the login page reloaded and did not show the error message (the client treated any 401 as an expired session).
+- (functionality check) With a missing or invalid environment variable, the server started and answered every request with an empty 500 error. Configuration is now validated at start-up: the process exits with the Romanian message listing the variables (as documented in DEPLOYMENT.md §15).
+- (functionality check) After downloading a file (timetable template, report Excel export), in-app links on the same page stopped working until reload: the download buttons were router links (`next/link`) pointing to API routes, which left the client router stuck in a pending navigation. They are now plain download links (`ButtonDownload`).
+
+Observed, not an application bug: the server log shows one `pg` deprecation warning ("client.query() when the client is already executing a query"). It comes from Prisma's internal query interpreter; `pg` 8 queues these queries correctly. `pg` is pinned to `^8`. Upgrading to `pg` 9 must wait for a Prisma adapter release that supports it.
 
 ## 7. Deployment requirements (summary – details in DEPLOYMENT.md)
 Linux + systemd, Node.js 22, PostgreSQL 16 (roles `catalog_owner`/`catalog_app`), reverse proxy with HTTPS (Caddy/Nginx), domain name, environment variables from `.env.production.example`, daily backup copied off-site, `/api/health` monitoring.
